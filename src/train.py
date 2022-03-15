@@ -132,7 +132,8 @@ class Trainer():
 
             # disentanglement loss
             disentanglement_loss = calc_pl_lengths(x_mod, dis_target) + \
-                                        hpenalty(self.classifier_quantized, dis_target)
+                                        hpenalty(self.classifier_quantized, 
+                                                        x_mod, G_z=dis_target)
 
             # total loss
             loss = recon_loss_ + disentanglement_loss + quant_loss
