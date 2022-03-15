@@ -37,6 +37,12 @@ class Trainer():
         self.classifier_quantized = classifier.classifier
 
         self.DiscreteModel()
+
+        self.nepochs = 2000
+        self.batch_size = 32
+        self.data_root = ''
+        self.logs_root = ''
+        self.input_size = 32
         self.__init__dl()
 
         self.lr = 0.001
@@ -137,9 +143,10 @@ class Trainer():
     def train(self):
         train_loader, valid_loader = self.__init__dl()
 
-        self.training_step(train_loader)
-        loss = self.validation_step(valid_loader)
-        
+        for iepoch in range(self.nepochs):
+            self.training_step(train_loader)
+            loss = self.validation_step(valid_loader)
+
 
 
     @torch.no_grad()
