@@ -1,5 +1,5 @@
-from calendar import c
 import torch
+import os
 from torch import nn
 from src.layers import StyleVectorizer, CodeBook
 from torch.optim import Adam
@@ -104,7 +104,6 @@ class Trainer():
             loss = recon_loss_ + disentanglement_loss + quant_loss
             loss.backward()
             self.opt.step()
-            self.LR_sch.step(loss)
         pass
 
 
@@ -144,10 +143,40 @@ class Trainer():
     def train(self):
         train_loader, valid_loader = self.__init__dl()
 
+        min_loss = np.inf
         for iepoch in range(self.nepochs):
             self.training_step(train_loader)
             loss = self.validation_step(valid_loader)
 
+            if loss < min_loss:
+                self.save_model(iepoch, loss)
+            else:
+                self.LR_sch.step(loss)
+
+    def save_model(self, iepoch, loss):
+        model = {
+                'encoder': self.encoder.state_dict(),
+                'codebook': self.codebook.state_dict(),
+                'classifier': self.classifier_quantized.state_dict(),
+                'modulator': self.stylevectorizer.state_dict(),
+                'epoch': iepoch,
+                'loss': loss
+        }
+
+        os.makedirs(os.path.join(self.logs_root, 'models'), exist_ok=True)
+        path = os.path.join(self.logs_root, 'models')
+        torch.save(model, os.path.join(path, 'best.pth'))
+
+
+    def load_model(self, path):
+        model = torch.load(path)
+        loaded_epoch = model['epoch']
+        loss = model['loss']
+
+        self.encoder.load_state_dict(model['encoder'])
+        self.codebook.load_state_dict(model['codebook'])
+        self.classifier_quantized.load_state_dict(model['classifier'])
+        self.stylevectorizer.load_state_dict(model['modulator'])
 
 
     @torch.no_grad()
