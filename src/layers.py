@@ -19,6 +19,14 @@ class StyleVectorizer(nn.Module):
         x = F.normalize(x, dim=1)
         return self.net(x)
 
+class HLoss(nn.Module):
+    def __init__(self):
+        super(HLoss, self).__init__()
+
+    def forward(self, x):
+        b = F.softmax(x, dim=1) * F.log_softmax(x, dim=1)
+        b = -1.0 * b.sum()
+        return b
 
 class CodeBook(nn.Module):
     def __init__(self, nfeatures, nsampling, beta, remap=None, unknown_index="random",
@@ -29,6 +37,7 @@ class CodeBook(nn.Module):
         self.beta = beta
         self.legacy = legacy
 
+        self.entropy = HLoss
         self.embedding = nn.Embedding(self.n_e, self.e_dim)
         self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
 
@@ -96,6 +105,10 @@ class CodeBook(nn.Module):
         else:
             loss = torch.mean((z_q.detach()-z)**2) + self.beta * \
                    torch.mean((z_q - z.detach()) ** 2)
+
+
+        # entropy regularization
+        loss += self.entropy(z_q)
 
         # preserve gradients
         z_q = z + (z_q - z).detach()
