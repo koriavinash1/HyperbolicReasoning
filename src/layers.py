@@ -52,7 +52,7 @@ class CodeBook(nn.Module):
             print(f"Remapping {self.n_e} indices to {self.re_embed} indices. "
                   f"Using {self.unknown_index} for unknown indices.")
         else:
-            self.re_embed = n_e
+            self.re_embed = self.n_e
 
         self.sane_index_shape = sane_index_shape
 
