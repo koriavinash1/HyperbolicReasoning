@@ -1,3 +1,4 @@
+from click import style
 import torch
 import os
 from torch import nn
@@ -14,18 +15,39 @@ from src.loss import hpenalty, calc_pl_lengths, recon_loss
 class Trainer():
     def __init__(self, 
                     classifier, 
-                    nfeatures = 1024,
-                    latent_size = 64,
                     codebook_length = 1024,
                     sampling_size = 128,
-                    num_classes = 10):
+                    data_root = './data',
+                    logs_root ='./logs/',
+                    image_size = 128,
+                    style_depth = 16,
+                    batch_size = 5,
+                    nepochs = 150,
+                    learning_rate = 2e-4,
+                    num_workers =  None,
+                    save_every = 'best',
+                    aug_prob = 0.,
+                    recon_loss_weightage = 1.0,
+                    disentangle_weightage = 1.0,
+                    quantization_weightage = 1.0,
+                    hessian_weightage = 1.0,
+                    pl_weightage = 1.0,
+                    seed = 42,
+                    nclasses=10,
+                    latent_dim=512,
+                    featurelen=1024,
+                    encoder=False,
+                    log = False,):
 
         self.codebook_length = codebook_length
         self.sampling_size = sampling_size
-        self.num_classes = num_classes
-        self.nfeatures = nfeatures
-        self.latent_size = latent_size
-        self.style_depth = 2
+        self.nfeatures = featurelen
+        self.latent_size = latent_dim
+        self.encoder = encoder
+        self.log = log
+        self.style_depth = style_depth
+        self.seed = seed 
+        self.nclasses = nclasses
 
         with torch.no_grad():
             self.feature_extractor = classifier.features
@@ -38,14 +60,15 @@ class Trainer():
 
         self.DiscreteModel()
 
-        self.nepochs = 2000
-        self.batch_size = 32
-        self.data_root = ''
-        self.logs_root = ''
-        self.input_size = 32
+        self.nepochs = nepochs
+        self.batch_size = batch_size
+        self.data_root = data_root
+        self.logs_root = logs_root
+        self.input_size = image_size
+        self.num_workers = num_workers
         self.__init__dl()
 
-        self.lr = 0.001
+        self.lr = learning_rate
         self.wd = 0.00001
         self.__init__opt()
 
