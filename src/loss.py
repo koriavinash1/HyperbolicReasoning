@@ -1,20 +1,26 @@
 import torch
 import math
 import torch.nn as nn
-from src.hpenalty import hessian_penalty
+from hpenalty import hessian_penalty
 from torch.autograd import grad as torch_grad
 
 
 
-def recon_loss():
+#def recon_loss():
+#    mse = nn.MSELoss(reduction='mean')
+ #   l1 = nn.L1Loss(reduction='mean')
+  #  def loss(logits, target):
+ #       return 0.99*mse(logits, target) +\
+ #                0.01*l1(logits, target)
+  #  return loss
+
+def recon_loss(logits, target):
     mse = nn.MSELoss(reduction='mean')
     l1 = nn.L1Loss(reduction='mean')
-    def loss(logits, target):
-        return 0.99*mse(logits, target) +\
-                 0.01*l1(logits, target)
-    return loss
 
 
+    return 0.99 * mse(logits, target) + \
+               0.01 * l1(logits, target)
 def gradient_penalty(images, output, weight = 10):
     batch_size = images.shape[0]
     gradients = torch_grad(outputs=output, inputs=images,

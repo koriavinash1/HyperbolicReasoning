@@ -1,0 +1,38 @@
+{
+    "data_root": "/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNISTv0/TI/data",
+    "logs_root": "/vol/biomedic3/as217/symbolicAI/SymbolicInterpretability/logs",
+    "name": "default",
+    "image_size": [
+        32,
+        32
+    ],
+    "style_depth": 16,
+    "batch_size": 50,
+    "nepochs": 50,
+    "learning_rate": 0.0002,
+    "num_workers": null,
+    "save_every": 1000,
+    "sigma": 0.1,
+    "aug_prob": 0.0,
+    "recon_loss_weightage": 1.0,
+    "disentangle_weightage": 1.0,
+    "quantization_weightage": 1.0,
+    "hessian_weightage": 1.0,
+    "pl_weightage": 1.0,
+    "seed": 42,
+    "nclasses": 10,
+    "latent_dim": 256,
+    "log": true,
+    "ch": 32,
+    "out_ch": 3,
+    "ch_mult": [
+        1,
+        2,
+        4
+    ],
+    "num_res_blocks": 1,
+    "dropout": 0.0,
+    "resamp_with_conv": true,
+    "in_channels": 3,
+    "hiddendim": 256
+}
