@@ -4,7 +4,7 @@ import os
 from torch import nn
 import fire
 import json
-from layers import DiscAE, DiscClassifier, Decoder
+from layers import DiscAE, DiscClassifier, Decoder, VQmodulator
 from clsmodel import mnist
 from torch.optim import Adam
 import numpy as np
@@ -79,9 +79,8 @@ class Trainer():
 
             self.classifier_baseline = classifier.classifier.to(self.device)
             self.classifier_baseline.eval()
-        self.modelclass =  DiscClassifier(ch = ch, out_ch = out_ch, ch_mult = ch_mult, num_res_blocks = num_res_blocks,
-                      dropout = dropout, resamp_with_conv = resamp_with_conv, in_channels = in_channels,
-                      z_channels = self.latent_size,sigma = sigma, input = self.latentdim, hiddendim = hiddendim, device = self.device, codebooksize= self.codebook_length).to(self.device)
+        
+        self.modelclass = VQmodulator(features = 64,  z_channels = self.latent_size, codebooksize = self.codebook_length, device = self.device).to(self.device)
         self.inchannel = math.prod(self.latentdim)        
         clfq = []
         clfq.append(nn.Linear(self.inchannel, hiddendim))
@@ -127,13 +126,13 @@ class Trainer():
             self.opt.zero_grad()
             self.opt2.zero_grad()
             with torch.no_grad():
-                features = self.feature_extractor(data)
-                features = features.view(features.size(0), -1)
-                conti_target = m(self.classifier_baseline(features))
+                f = self.feature_extractor(data)
+                features1 = f.view(f.size(0), -1)
+                conti_target = m(self.classifier_baseline(features1))
             # feature extraction
 
-            quant_loss, hidden_dim, zqf, ce , td, hrc, r = self.modelclass(data)
-            qloss = quant_loss-hrc+td
+            quant_loss, hidden_dim, zqf, ce , td, hrc, r = self.modelclass(f)
+            qloss = quant_loss - hrc + td
             h = hidden_dim.view(hidden_dim.size(0), -1)
             dis_target = m(self.cq(hidden_dim))
             class_loss_ = recon_loss(logits = dis_target, target =conti_target)
@@ -141,10 +140,11 @@ class Trainer():
             loss.backward(retain_graph = True)
             recon = self.dec(hidden_dim)
             # disentanglement loss
-           # disentanglement_loss = torch.mean(calc_pl_lengths(hidden_dim, recon)) + \
-            #                       hpenalty(self.dec, zqf, G_z=recon)
+            #disentanglement_loss = torch.mean(calc_pl_lengths(hidden_dim, recon)) + \
+             #                      hpenalty(self.dec, zqf, G_z=recon)
            # disentanglement_classloss = hpenalty(self.cq, hidden_dim, G_z=dis_target) 
             #loss = class_loss_ + 0.2 * disentanglement_loss + disentanglement_classloss + quant_loss +ce
+            #loss = class_loss_ +  quant_loss +ce
            # total loss
            # if loss > 0:
             #    loss = loss
@@ -152,6 +152,7 @@ class Trainer():
             #    loss = torch.exp(class_loss_ + 0.2 * disentanglement_loss + quant_loss +ce)
             
             #for p in self.dec.parameters(): p.requires_grad = False
+            #loss.backward(retain_graph = True)
             recon_loss_ = recon_loss(logits = recon, target = data)
             for p in self.dec.parameters(): p.requires_grad = True
             for p  in self.modelclass.parameters(): p.requires_grad = False
@@ -170,11 +171,11 @@ class Trainer():
             print(
                 f"train epoch:%.1f" % epoch,
                 f"train reconloss:%.4f" % recon_loss_,
-                f"qloss:%.4f" % qloss,
+                f"train qloss:%.4f" % qloss,
                 f"radius:%.4f" % r,
                 f"hypersphereloss train:%.4f" % hrc,
-               # f"train disentanglement_loss:%.4f" % disentanglement_loss,
-               # f"train disentanglement_classloss:%.4f" % disentanglement_classloss,
+            #    f"train disentanglement_loss:%.4f" % disentanglement_loss,
+             #   f"train disentanglement_classloss:%.4f" % disentanglement_classloss,
                 f"train classloss:%.4f" % class_loss_,
                 f"total train cb avg distance:%.4f" % td,
                 f"total train cb avg variance:%.4f" % ce,
@@ -193,16 +194,16 @@ class Trainer():
             #if self.cuda:
              #   data = data.cuda()
             data = Variable(data.to(self.device))
+
             m = nn.Softmax(dim=1)
-            
             # feature extraction
             with torch.no_grad():
                 features = self.feature_extractor(data)
-                features = features.view(features.size(0), -1)
-                conti_target = m(self.classifier_baseline(features))
+                features1 = features.view(features.size(0), -1)
+                conti_target = m(self.classifier_baseline(features1))
             # feature extraction
 
-            quant_loss, hidden_dim, zqf, ce , td, r, hrc = self.modelclass(data)
+            quant_loss, hidden_dim, zqf, ce , td, hrc, r = self.modelclass(features)
             h = hidden_dim.view(hidden_dim.size(0), -1)
             dis_target = m(self.classifier_quantized(h))
             recon = self.dec(hidden_dim)
@@ -213,7 +214,7 @@ class Trainer():
             class_loss_ = recon_loss(logits = dis_target, target =conti_target)
 
             # disentanglement loss
-           # disentanglement_loss =         hpenalty(self.dec, zqf, G_z=recon)
+            #disentanglement_loss =         hpenalty(self.dec, zqf, G_z=recon)
 
 
 
@@ -226,7 +227,7 @@ class Trainer():
                 f"val epoch:%.1f" % epoch,
                 f"val reconloss:%.4f" % recon_loss_,
                 f"hypersphereloss val:%.4f" % hrc,
-                #f" val disentanglement_loss:%.4f" % disentanglement_loss,
+               # f" val disentanglement_loss:%.4f" % disentanglement_loss,
                 f"val classloss:%.4f" % class_loss_,
                 f"total val td avg distance:%.4f" % td,
                 f"total val cb avg variance:%.4f" % ce,
@@ -315,7 +316,7 @@ def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNI
                       nclasses=10,
                       latent_dim=64,
                       log=True,
-                      ch=16,
+                      ch=32,
                       out_ch=3,
                       ch_mult=(1, 2, 4, 8),
                       num_res_blocks = 1,

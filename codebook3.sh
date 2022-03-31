@@ -11,6 +11,6 @@
 source /vol/biomedic3/as217/medicaltransformers/bin/activate
 
 # Run python script
-python /vol/biomedic3/as217/symbolicAI/SymbolicInterpretability/src/trainclassifier.py
+python /vol/biomedic3/as217/symbolicAI/SymbolicInterpretability/src/trainAEwithclassifier2.py
 # call script
-nohup codebook.sh
+nohup codebook3.sh

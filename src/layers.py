@@ -390,19 +390,57 @@ class DiscClassifier(nn.Module):
         super(DiscClassifier, self).__init__()
         self.enc = Encoder(ch = ch,  ch_mult=ch_mult, num_res_blocks = num_res_blocks,
                  dropout=dropout, resamp_with_conv=resamp_with_conv, in_channels = in_channels,z_channels = z_channels)
-        self.quantize = VectorQuantizer2DHS(device, codebooksize, z_channels, beta=0.25, sigma = 0.1)
+        self.quantize = VectorQuantizer2DHS(device, codebooksize, z_channels, beta=1.0, sigma = 0.1)
         #self.BottleneckMLP = BottleneckMLP(input = input, hiddendim = hiddendim)
 
 
 
     def forward (self, x):
         x1 = self.enc(x)
-        z_q, loss, distances, info, zqf, ce, td,hrc = self.quantize(x1)
+        z_q, loss, distances, info, zqf, ce, td,hrc, r = self.quantize(x1)
 
 
 
-        return loss, z_q, zqf, ce, td, hrc
+        return loss, z_q, zqf, ce, td, hrc, r
+class VQmodulator(nn.Module):
 
+    def __init__(self, *, features,dropout=0.0, z_channels, codebooksize, device):
+        super(VQmodulator, self).__init__()
+        self.norm1 = nn.BatchNorm2d(features, affine=True)
+        self.conv1 = torch.nn.Conv2d(features,
+                                       z_channels,
+                                       kernel_size=1,
+                                       stride=1,
+                                       )
+
+        self.norm2 = nn.BatchNorm2d(z_channels, affine=True)
+        self.conv2 = torch.nn.Conv2d(z_channels,
+                                      z_channels,
+                                      kernel_size=1,
+                                      stride=1,
+                                      )
+        
+        self.quantize = VectorQuantizer2DHS(device, codebooksize, z_channels, beta=1.0, sigma=0.1)
+                # self.BottleneckMLP = BottleneckMLP(input = input, hiddendim = hiddendim)
+
+    def forward(self, x):
+        x1 = self.norm1(x)
+        #x1 = nonlinearity(x1)
+        x1 = self.conv1(x1)
+        x2 = self.norm2(x1)
+        x2 = self.conv2(x1)
+        z_q, loss, distances, info, zqf, ce, td, hrc, r = self.quantize(x2)
+
+        return loss, z_q, zqf, ce, td, hrc, r
+
+class Clamp(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input):
+        return input.clamp(min=0.9, max=1.1) # the value in iterative = 2
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        return grad_output.clone()
 class VectorQuantizer2DHS(nn.Module):
     """
     Improved version over VectorQuantizer, can be used as a drop-in replacement. Mostly
@@ -420,12 +458,14 @@ class VectorQuantizer2DHS(nn.Module):
         self.legacy = legacy
         self.sigma = sigma
         self.device = device
-        sphere = Hypersphere(dim=self.e_dim-1)
-        self.embedding = nn.Embedding(self.n_e, self.e_dim)
+        sphere = Hypersphere(dim=16-1)
+        self.embedding = nn.Embedding(self.n_e, 16)
         points_in_manifold = torch.Tensor(sphere.random_uniform(n_samples=self.n_e))
         self.embedding.weight.data.copy_(points_in_manifold).requires_grad=True
         #self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
-        self.hsreg = lambda x: [torch.square(1 - torch.norm(x[i])) for i in range(x.shape[0])]
+        self.hsreg = lambda x: [ torch.norm(x[i]) for i in range(x.shape[0])]
+        self.r = torch.nn.Parameter(torch.ones(self.n_e))
+        self.ed = lambda x: [torch.norm(x[i]) for i in range(x.shape[0])]
         self.remap = remap
         if self.remap is not None:
             self.register_buffer("used", torch.tensor(np.load(self.remap)))
@@ -479,48 +519,64 @@ class VectorQuantizer2DHS(nn.Module):
         assert rescale_logits==False, "Only for interface compatible with Gumbel"
         assert return_logits==False, "Only for interface compatible with Gumbel"
         # reshape z -> (batch, height, width, channel) and flatten
-        z = rearrange(z, 'b c h w -> b h w c').contiguous()
-        z_flattened = z.view(-1, self.e_dim)
+        z = rearrange(z, 'b c h w -> b c h w ').contiguous()
+        z_flattened = z.view(-1, 16)
         # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
         #d =  torch.einsum('bd,dn->bn', z_flattened, rearrange(self.embedding.weight, 'n d -> d n'))
-
-        #d1 = torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
-        #d = torch.acos(d)
-        #d1 = torch.acos(d1)
+        
+        d1 = torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
+        ed1 = torch.tensor(self.ed(self.embedding.weight))
+        ed1 = ed1.repeat(self.n_e, 1)
+        ed2 = ed1.transpose(0,1)
+        ed3 = ed1 * ed2
+        edx = d1/ed3.to(self.device)
+        edx = torch.clamp(edx, min=-0.99999, max=0.99999)
+        # d = torch.acos(d)
+        d1 = torch.acos(edx)
+        
+        print(d1.shape)
+        
         d = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + \
             torch.sum(self.embedding.weight**2, dim=1) - 2 * \
             torch.einsum('bd,dn->bn', z_flattened, rearrange(self.embedding.weight, 'n d -> d n'))
-        d1 = torch.sum(self.embedding.weight ** 2, dim=1, keepdim=True) + \
-            torch.sum(self.embedding.weight ** 2, dim=1) - 2 * \
-            torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
+        #d1 = torch.sum(self.embedding.weight ** 2, dim=1, keepdim=True) + \
+         #    torch.sum(self.embedding.weight ** 2, dim=1) - 2 * \
+          #   torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
         min_distance = torch.kthvalue(d1, 2, 0)
-        total_min_distance = torch.sum(min_distance[0])
+        total_min_distance = torch.mean(min_distance[0])
         codebookvariance = torch.std(min_distance[0])
         min_encoding_indices = torch.argmin(d, dim=1)
-        distances = d[range(d.shape[0]), min_encoding_indices].view(z.shape[0], z.shape[1], z.shape[2])
+        distances = d[range(d.shape[0]), min_encoding_indices].view(z.shape[0], z.shape[1])
         distances = self.rbf(distances)
 
         z_q = self.embedding(min_encoding_indices).view(z.shape)
         #hsreg = lambda x: [1 - torch.norm(x[i]) for i in range(x.shape[0])]
-        hsw = torch.sum(torch.Tensor(self.hsreg(self.embedding.weight))).to(self.device)
-
+        hsw = torch.Tensor(self.hsreg(self.embedding.weight)).to(self.device)
+        hsw = torch.mean(torch.square(self.r - hsw))
         perplexity = None
         min_encodings = None
-
+        clamp_class = Clamp()
+        clamp_class.apply(self.r)
         # compute loss for embedding
+         
         if not self.legacy:
             loss = self.beta * torch.mean((z_q.detach() - z) ** 2) + \
-                   torch.mean((z_q - z.detach()) ** 2) + torch.sum(torch.Tensor(self.hsreg(self.embedding.weight))).to(self.device) - total_min_distance
+                   torch.mean((z_q - z.detach()) ** 2) + hsw - total_min_distance
         else:
             loss = torch.mean((z_q.detach() - z) ** 2) + self.beta * \
-                   torch.mean((z_q - z.detach()) ** 2) +torch.sum(torch.Tensor(self.hsreg(self.embedding.weight))).to(self.device)- total_min_distance
-
+                   torch.mean((z_q - z.detach()) ** 2) + hsw  - total_min_distance
+        """
+        if not self.legacy:
+            loss = self.beta * torch.mean((z_q.detach() - z) ** 2) + hsw - total_min_distance
+        else:
+            loss = self.beta * torch.mean((z_q - z.detach()) ** 2) +hsw - total_min_distance
+        """ 
         # preserve gradients
         z_q = z + (z_q - z).detach()
 
         # reshape back to match original input shape
-        z_q = rearrange(z_q, 'b h w c -> b c h w').contiguous()
-        z_flattened1 = z_q.view(z.shape[0],z.shape[1]*z.shape[2], self.e_dim)
+        z_q = rearrange(z_q, 'b c h w-> b c h w').contiguous()
+        z_flattened1 = z_q.view(z.shape[0],self.e_dim, z_q.shape[2]*z_q.shape[3])
 
 
 
@@ -534,7 +590,7 @@ class VectorQuantizer2DHS(nn.Module):
             min_encoding_indices = min_encoding_indices.reshape(
                 z_q.shape[0], z_q.shape[2], z_q.shape[3])
 
-        return z_q, loss, distances, (perplexity, min_encodings, min_encoding_indices), z_flattened1,codebookvariance, total_min_distance,  hsw
+        return z_q, loss, distances, (perplexity, min_encodings, min_encoding_indices), z_flattened1,codebookvariance, total_min_distance,  hsw, torch.mean(self.r)
 
     def get_codebook_entry(self, indices, shape):
         # shape specifying (batch, height, width, channel)
