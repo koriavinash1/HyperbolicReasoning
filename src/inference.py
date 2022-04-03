@@ -7,6 +7,25 @@ import torch.nn as nn
 import torch.nn.functional as F
 import itertools
 
+from  Lib.ILPRLEngine import *
+from Lib.DNF import DNF
+from Lib.CNF import CNF
+from Lib.DNF_Ex import DNF_Ex
+
+from Lib.mylibw import read_by_tokens
+from Lib.PredicateLibV5 import PredFunc
+from sklearn.metrics import (accuracy_score, 
+                                precision_recall_curve,
+                                auc,
+                                precision_recall_fscore_support,
+                                average_precision_score,
+                                log_loss,
+                                roc_auc_score,
+                                confusion_matrix)
+import pandas as pd
+import operator
+import scipy.signal
+
 import networkx as nx
 
 
@@ -77,7 +96,7 @@ class SymbolExtractor(object):
         
         distribution = np.array(distribution)
         return distribution
-        
+
 
     def generateBoolean(self):
 
@@ -103,4 +122,68 @@ class SymbolExtractor(object):
 
         return data 
 
+
+
+class ILPExplainer(object):
+    def __init__(self, boolean_data,
+                        nhatoms,
+                        nbatoms,
+                        max_clause = 10,
+                        lr = 1e-3,
+                        nchain=7,
+                        batch_size = 16,
+                        nepochs = 200,
+                        tpredicate = 1,
+                        classmapping = None,
+                        featuremapping = None
+                        ):
+        # boolean_data: background facts for ILP learning
+        # nhatoms: total number of head atoms
+        # nbatoms: total number of body atoms
+        # max_clause: max. number of clause in ILP formulae
+        # lr: learning rate
+        # nchain: total number of forward chaining steps
+        # batch_size: batch size for training
+        # nepochs: total number of training epochs
+        # tpredicate : target predicate to construct explanation rules
+        # classmapping: idx to str mapping for head atoms
+        # featuremapping: idx to str mapping for body atoms
+
+        self.data = boolean_data
+        self.nhatoms = nhatoms
+        self.nbatoms = nbatoms
+        self.max_clause = max_clause
+        self.lr = lr 
+        self.nchain = nchain
+        self.batch_size = batch_size
+        self.nepochs = nepochs
+        self.target_predicate = tpredicate
+        self.classmapping = classmapping
+        self.featuremapping = featuremapping
+
+        if self.classmapping is None:
+            self.classmapping = {k: 'class-{}'.format(k) for k in range(self.nhatoms)}
+
+        if self.featuremapping is None:
+            self.featuremapping = {k: 'class-{}'.format(k) for k in range(self.nbatoms)}
+
+
+
+    def formatting(self, data):
+        pass
+
+
+    def represent(self, ):
+        pass     
+
+    
+    def learn(self,):
+        pass 
+
+
+    def training_metrics(self, 
+                            preds, 
+                            targets):
+
+        pass
 
