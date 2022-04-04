@@ -170,8 +170,41 @@ class ILPExplainer(object):
 
 
     def formatting(self, data):
+        constants = {}
+        
+        for i in range(self.nbatoms):
+            constants[self.featuremapping[i]] = [f'f{i}_{j}' for j in range(len(data))]
+        
+        for i in range(self.nhatoms):
+            constants[self.classmapping[i]] = [f'c{i}_{j}' for j in range(len(data))]
+
+        constants['X'] = [f'x_{j}' for j in range(len(data))]
+        return constants
+
+    def addBackground(self):
         pass
 
+    def initialize(self):
+        constants = self.formatting(self.data)
+        predColl = PredCollection (constants)
+
+        for i in range(self.nbatoms):
+            predColl.add_pred(dname = f'fc_{i}', arguments =['X'], variables =['X'] )
+
+        for i in range(self.nhatoms):
+            predColl.add_pred(dname=f'fclass_{i}', 
+                                arguments=['X'], 
+                                variables=['X'],
+                                pFunc = DNF(f'fclass_{i}',
+                                            terms=self.max_clause, 
+                                            init=[1,.1,0,.5],
+                                            sig=1), 
+                                use_neg=True, 
+                                exc_conds=[('*','rep1') ], 
+                                exc_terms=[],  
+                                Fam='or',)
+        predColl.initialize_predicates()  
+        return predColl
 
     def represent(self, ):
         pass     
