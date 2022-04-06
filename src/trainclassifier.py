@@ -5,7 +5,7 @@ from torch import nn
 import fire
 import json
 from layers import DiscAE, DiscClassifier, Decoder, VQmodulator
-from clsmodel import mnist, afhq, stl10
+from clsmodel import mnist #, afhq, stl10
 from torch.optim import Adam
 import numpy as np
 from dataset import get

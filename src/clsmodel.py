@@ -86,27 +86,27 @@ def mnist(n_channel, pretrained=None):
 #         print ("STL10 weights loaded ............")
 #     return model
 
-def stl10(n_channel, pretrained=None):
-    nclass = 10
-    net = model.DenseNet121(num_channel=n_channel, classCount=nclass)
-    if pretrained is not None:
-        m = torch.load(model_urls['stl10'])
-        state_dict = m.state_dict() if isinstance(m, nn.Module) else m
-        assert isinstance(state_dict, (dict, OrderedDict)), type(state_dict)
-        net.load_state_dict(state_dict)
+# def stl10(n_channel, pretrained=None):
+#     nclass = 10
+#     net = model.DenseNet121(num_channel=n_channel, classCount=nclass)
+#     if pretrained is not None:
+#         m = torch.load(model_urls['stl10'])
+#         state_dict = m.state_dict() if isinstance(m, nn.Module) else m
+#         assert isinstance(state_dict, (dict, OrderedDict)), type(state_dict)
+#         net.load_state_dict(state_dict)
 
-        print ("STL10 weights loaded ............")
-    return net
+#         print ("STL10 weights loaded ............")
+#     return net
 
-def afhq(n_channel, pretrained=None):
-    nclass = 3
-    net = model.DenseNet121(num_channel=n_channel, classCount=nclass)
-    if pretrained is not None:
-        m = torch.load(model_urls['afhq'])
-        state_dict = m.state_dict() if isinstance(m, nn.Module) else m
-        assert isinstance(state_dict, (dict, OrderedDict)), type(state_dict)
-        net.load_state_dict(state_dict)
+# def afhq(n_channel, pretrained=None):
+#     nclass = 3
+#     net = model.DenseNet121(num_channel=n_channel, classCount=nclass)
+#     if pretrained is not None:
+#         m = torch.load(model_urls['afhq'])
+#         state_dict = m.state_dict() if isinstance(m, nn.Module) else m
+#         assert isinstance(state_dict, (dict, OrderedDict)), type(state_dict)
+#         net.load_state_dict(state_dict)
 
-        print ("AFHQ weights loaded ............")
-    return net
+#         print ("AFHQ weights loaded ............")
+#     return net
 

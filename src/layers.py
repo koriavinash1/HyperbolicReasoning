@@ -439,6 +439,73 @@ class VQmodulator(nn.Module):
         return loss, z_q, zqf, ce, td, hrc, r
 
 
+
+class HierarchyVQmodulator(nn.Module):
+
+    def __init__(self, *, features,dropout=0.0, z_channels, codebooksize, device):
+        super(HierarchyVQmodulator, self).__init__()
+        self.norm1 = nn.BatchNorm2d(features, affine=True)
+
+        self.conv1 = torch.nn.Conv2d(features,
+                                       z_channels,
+                                       kernel_size=1,
+                                       stride=1,
+                                       )
+
+        self.norm2 = nn.BatchNorm2d(z_channels, affine=True)
+        self.conv2 = torch.nn.Conv2d(z_channels,
+                                      z_channels,
+                                      kernel_size=1,
+                                      stride=1,
+                                      )
+        
+        self.quantize = VectorQuantizer2DHS(device, codebooksize, z_channels, beta=1.0, sigma=0.1)
+        self.q1w = torch.nn.Parameter(torch.ones(z_channels))
+
+        self.quantize1 = VectorQuantizer2DHS(device, codebooksize//2, z_channels, beta=1.0, sigma=0.1)
+        self.q2w = torch.nn.Parameter(torch.ones(z_channels))
+
+
+        self.quantize2 = VectorQuantizer2DHS(device, codebooksize//4, z_channels, beta=1.0, sigma=0.1)
+        self.q3w = torch.nn.Parameter(torch.ones(z_channels))
+
+        self.quantize3 = VectorQuantizer2DHS(device, z_channels, z_channels, beta=1.0, sigma=0.1)
+        self.q4w = torch.nn.Parameter(torch.ones(z_channels))
+
+        # self.BottleneckMLP = BottleneckMLP(input = input, hiddendim = hiddendim)
+
+
+
+    def forward(self, x):
+        x1 = self.norm1(x)
+        #x1 = nonlinearity(x1)
+        x1 = self.conv1(x1)
+        x2 = self.norm2(x1)
+        x2 = self.conv2(x1)
+
+        z_q1, loss1, distances, info, zqf1, ce1, td1, hrc1, r1 = self.quantize(x2)
+        z_q1 = x2 + self.q1w * z_q1 
+
+        z_q2, loss2, distances, info, zqf2, ce2, td2, hrc2, r2 = self.quantize1(z_q1)
+        z_q2 = z_q1 + self.q2w * z_q2 
+        
+        z_q3, loss3, distances, info, zqf3, ce3, td3, hrc3, r3 = self.quantize2(z_q2)
+        z_q3 = z_q2 + self.q3w * z_q3 
+        
+        z_q4, loss4, distances, info, zqf4, ce4, td4, hrc4, r4 = self.quantize3(z_q3)
+        z_q4 = z_q3 + self.q4w * z_q4
+        
+
+        loss = 0.25*(loss1 + loss2 + loss3 + loss4)
+        zqf = 0.25*(zqf1 + zqf2 + zqf3 + zqf4) 
+        ce = 0.25*(ce1 + ce2 + ce3 + ce4) 
+        td = 0.25*(td1 + td2 + td3 + td4) 
+        hrc = 0.25*(hrc1 + hrc2 + hrc3 + hrc4) 
+        r = 0.25*(r1 + r2 + r3 + r4)
+
+        return loss, z_q4, zqf, ce, td, hrc, r
+
+
 class Clamp(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input):
