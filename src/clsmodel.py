@@ -86,7 +86,6 @@ def mnist(n_channel, pretrained=None):
 #         print ("STL10 weights loaded ............")
 #     return model
 
-"""
 def stl10(n_channel, pretrained=None):
     nclass = 10
     net = model.DenseNet121(num_channel=n_channel, classCount=nclass)
@@ -111,4 +110,3 @@ def afhq(n_channel, pretrained=None):
         print ("AFHQ weights loaded ............")
     return net
 
-"""    

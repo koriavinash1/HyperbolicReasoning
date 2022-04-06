@@ -5,14 +5,16 @@ from torch import nn
 import fire
 import json
 from layers import DiscAE, DiscClassifier, Decoder, VQmodulator
-from clsmodel import mnist
+from clsmodel import mnist, afhq, stl10
 from torch.optim import Adam
 import numpy as np
 from dataset import get
 from torch.optim.lr_scheduler import ReduceLROnPlateau, StepLR
 from torch.autograd import Variable
 import math
-from loss import hpenalty, calc_pl_lengths, recon_loss
+from loss import hpenalty, calc_pl_lengths, recon_loss, ce_loss
+
+from sklearn.metrics import accuracy_score, f1_score
 
 
 class Trainer():
@@ -59,6 +61,7 @@ class Trainer():
         self.style_depth = style_depth
         self.seed = seed
         self.nclasses = nclasses
+
         map = lambda x, y: [x[i]//y[-1] for i in range(len(x))]
         self.latentdim = [self.latent_size]+map(image_size, ch_mult)
         self.nepochs = nepochs
@@ -73,6 +76,7 @@ class Trainer():
         self.lr = learning_rate
         self.wd = 0.00001
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
         with torch.no_grad():
             self.feature_extractor = classifier.features.to(self.device)
             self.feature_extractor.eval()
@@ -81,10 +85,12 @@ class Trainer():
             self.classifier_baseline.eval()
         
         self.modelclass = VQmodulator(features = 64,  z_channels = self.latent_size, codebooksize = self.codebook_length, device = self.device).to(self.device)
+        
         self.inchannel = math.prod(self.latentdim)        
         clfq = []
         clfq.append(nn.Linear(self.inchannel, hiddendim))
         clfq.append(nn.Linear(hiddendim, self.nclasses ))
+        
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
 
 
@@ -92,6 +98,8 @@ class Trainer():
                         lr=self.lr,
                         weight_decay=self.wd)
         self.LR_sch = ReduceLROnPlateau(self.opt)
+
+
         self.dec = Decoder(ch=ch, ch_mult=ch_mult, num_res_blocks=num_res_blocks, input=self.latentdim, hiddendim=hiddendim,
                            dropout=dropout, out_ch=out_ch, resamp_with_conv=resamp_with_conv, in_channels=in_channels,
                            z_channels=self.latent_size).to(self.device)
@@ -99,10 +107,16 @@ class Trainer():
                         lr=self.lr,
                         weight_decay=self.wd)
         self.LR_sch2 = ReduceLROnPlateau(self.opt2)
+
+
+
     def cq(self, hd):
         h = hd.view(hd.size(0), -1)
         dis_target = self.classifier_quantized(h)
         return dis_target
+
+
+
 
     def __init__dl(self):
         train_loader, test_loader = get(data_root = self.data_root,
@@ -118,56 +132,71 @@ class Trainer():
     def training_step(self, train_loader, epoch):
 
         for batch_idx, (data, _) in enumerate(train_loader):
-            #if self.cuda:
-               # data = data.cuda()
-            
+
             data = Variable(data.to(self.device))
             m = nn.Softmax(dim=1)
+
             self.opt.zero_grad()
             self.opt2.zero_grad()
+
+
+            # feature extraction
             with torch.no_grad():
                 f = self.feature_extractor(data)
                 features1 = f.view(f.size(0), -1)
                 conti_target = m(self.classifier_baseline(features1))
-            # feature extraction
+                conti_target = torch.argmax(conti_target, 1)
+                
 
-            quant_loss, hidden_dim, zqf, ce , td, hrc, r = self.modelclass(f)
+            # code book sampling
+            quant_loss, latent_features, zqf, ce , td, hrc, r = self.modelclass(f)
             qloss = quant_loss - hrc + td
-            h = hidden_dim.view(hidden_dim.size(0), -1)
-            dis_target = m(self.cq(hidden_dim))
-            class_loss_ = recon_loss(logits = dis_target, target =conti_target)
-            loss = class_loss_ +  quant_loss +ce
-            loss.backward(retain_graph = True)
-            recon = self.dec(hidden_dim)
-            # disentanglement loss
-            #disentanglement_loss = torch.mean(calc_pl_lengths(hidden_dim, recon)) + \
-             #                      hpenalty(self.dec, zqf, G_z=recon)
-           # disentanglement_classloss = hpenalty(self.cq, hidden_dim, G_z=dis_target) 
-            #loss = class_loss_ + 0.2 * disentanglement_loss + disentanglement_classloss + quant_loss +ce
-            #loss = class_loss_ +  quant_loss +ce
-           # total loss
-           # if loss > 0:
-            #    loss = loss
-           # else:
-            #    loss = torch.exp(class_loss_ + 0.2 * disentanglement_loss + quant_loss +ce)
-            
-            #for p in self.dec.parameters(): p.requires_grad = False
-            #loss.backward(retain_graph = True)
-            recon_loss_ = recon_loss(logits = recon, target = data)
-            for p in self.dec.parameters(): p.requires_grad = True
-            for p  in self.modelclass.parameters(): p.requires_grad = False
-            for p in self.classifier_quantized.parameters(): p.requires_grad = False
 
-            recon_loss_.backward()
+            dis_target = m(self.cq(latent_features))
+
+            # class_loss_ = recon_loss(logits = dis_target, target = conti_target)
+            class_loss_ = ce_loss(logits = dis_target, target = conti_target)
+
+
+            loss = class_loss_ +  quant_loss + ce
+            loss.backward()
             self.opt.step()
 
-            # recon_loss between continious and discrete features
 
+            # disentanglement loss
+            # disentanglement_loss = torch.mean(calc_pl_lengths(hidden_dim, recon)) + \
+            #                      hpenalty(self.dec, zqf, G_z=recon)
+            # disentanglement_classloss = hpenalty(self.cq, hidden_dim, G_z=dis_target) 
+            # loss = class_loss_ + 0.2 * disentanglement_loss + disentanglement_classloss + quant_loss +ce
+            # loss = class_loss_ +  quant_loss +ce
+            # total loss
+            # if loss > 0:
+            #    loss = loss
+            # else:
+            #    loss = torch.exp(class_loss_ + 0.2 * disentanglement_loss + quant_loss +ce)
+
+            #for p in self.dec.parameters(): p.requires_grad = False
+            #loss.backward(retain_graph = True)
+
+
+            recon = self.dec(latent_features.detach())
+            recon_loss_ = recon_loss(logits = recon, target = data)
+            recon_loss_.backward()
             self.opt2.step()
-            for p  in self.modelclass.parameters(): p.requires_grad = True
-            for p in self.classifier_quantized.parameters(): p.requires_grad = True 
+
+
+            # for p in self.dec.parameters(): p.requires_grad = True
+            # for p  in self.modelclass.parameters(): p.requires_grad = False
+            # for p in self.classifier_quantized.parameters(): p.requires_grad = False
+            # recon_loss between continious and discrete features
+            # for p  in self.modelclass.parameters(): p.requires_grad = True
+            # for p in self.classifier_quantized.parameters(): p.requires_grad = True 
+
+
             with torch.no_grad():
                  self.modelclass.quantize.r.clamp_(0.9, 1.1)
+
+
             print(
                 f"train epoch:%.1f" % epoch,
                 f"train reconloss:%.4f" % recon_loss_,
@@ -182,46 +211,72 @@ class Trainer():
                 f"total train loss:%.4f" % loss
             )
 
-
         pass
 
 
     @torch.no_grad()
     def validation_step(self, val_loader, epoch):
-        mean_loss = []
-        mean_recon_loss_ = []
-        for batch_idx, (data, _) in enumerate(val_loader):
-            #if self.cuda:
-             #   data = data.cuda()
-            data = Variable(data.to(self.device))
+        mean_loss = []; mean_recon_loss_ = []
+        mean_f1_score = []; mean_acc_score = []
 
+        for batch_idx, (data, _) in enumerate(val_loader):
+
+            data = Variable(data.to(self.device))
             m = nn.Softmax(dim=1)
+
+
             # feature extraction
             with torch.no_grad():
                 features = self.feature_extractor(data)
                 features1 = features.view(features.size(0), -1)
                 conti_target = m(self.classifier_baseline(features1))
-            # feature extraction
+                conti_target = torch.argmax(conti_target, 1)
 
-            quant_loss, hidden_dim, zqf, ce , td, hrc, r = self.modelclass(features)
-            h = hidden_dim.view(hidden_dim.size(0), -1)
-            dis_target = m(self.classifier_quantized(h))
-            recon = self.dec(hidden_dim)
+
+
+            # code book sampling
+            quant_loss, latent_features, zqf, ce , td, hrc, r = self.modelclass(features)
+
+            dis_target = m(self.cq(latent_features))
+            recon = self.dec(latent_features)
+
+            # save sample reconstructions
+            results_dir = os.path.join(self.logs_root, 'recon_imgs')
+            os.makedirs(results_dir, exist_ok=True)
+
+            if batch_idx == 1:
+                torchvision.utils.save_image(recon, 
+                                        str(results_dir / f'{str(epoch)}.png'), 
+                                        nrow=int(self.batch_size**0.5))
+                torchvision.utils.save_image(data, 
+                                        str(results_dir / f'{str(epoch)}.png'), 
+                                        nrow=int(self.batch_size**0.5))
 
 
             # recon_loss between continious and discrete features
             recon_loss_ = recon_loss(logits = recon, target = data)
-            class_loss_ = recon_loss(logits = dis_target, target =conti_target)
+            class_loss_ = ce_loss(logits = dis_target, target = conti_target)
+
 
             # disentanglement loss
-            #disentanglement_loss =         hpenalty(self.dec, zqf, G_z=recon)
+            # disentanglement_loss =         hpenalty(self.dec, zqf, G_z=recon)
 
 
 
             # total loss
-            loss = class_loss_ + quant_loss+ce
+            loss = class_loss_ + quant_loss + ce
             mean_loss.append(loss.cpu().numpy())
             mean_recon_loss_.append(recon_loss_.cpu().numpy())
+
+            # acc metrics
+            acc = accuracy_score(torch.argmax(dis_target).cpu().numpy(),
+                                            conti_target.cpu().numpy())
+            f1_ = f1_score(torch.argmax(dis_target).cpu().numpy(),
+                                            conti_target.cpu().numpy())
+
+
+            mean_f1_score.append(f1_)
+            mean_acc_score.append(acc)
 
             print(
                 f"val epoch:%.1f" % epoch,
@@ -231,9 +286,14 @@ class Trainer():
                 f"val classloss:%.4f" % class_loss_,
                 f"total val td avg distance:%.4f" % td,
                 f"total val cb avg variance:%.4f" % ce,
-                f"total val loss:%.4f" % loss
+                f"total val loss:%.4f" % loss,
+                f"F1 dis. w.r.t conti.:%.4f" % loss,
+                f"Accuracy dis. w.r.t conti.:%.4f" % loss,
             )
-        return np.mean(mean_loss), np.mean(mean_recon_loss_)
+        return (np.mean(mean_loss), 
+                    np.mean(mean_recon_loss_), 
+                    np.mean(mean_f1_score), 
+                    np.mean(mean_acc_score))
 
 
     def train(self):
@@ -244,50 +304,47 @@ class Trainer():
         for iepoch in range(self.nepochs):
 
             self.training_step(train_loader, iepoch)
-            loss, rloss = self.validation_step(valid_loader, iepoch)
+            loss, rloss, f1, acc  = self.validation_step(valid_loader, iepoch)
 
+            stats = {'loss': loss, 'f1': f1, 'acc': acc, 'rloss': rloss}
             if loss < min_loss:
-                self.save_classmodel(iepoch, loss)
+                self.save_classmodel(iepoch, stats)
                 min_loss = loss
             else:
                 self.LR_sch.step(loss)
 
             if rloss < min_recon:
-                self.save_decmodel(iepoch, loss)
                 min_recon = rloss
             else:
                 self.LR_sch2.step(loss)
 
-    def save_classmodel(self, iepoch, loss):
+
+
+    def save_classmodel(self, iepoch, stats):
         model = {
                 'modelclass': self.modelclass.state_dict(),
                 'discreteclassifier':self.classifier_quantized.state_dict(),
-                'epoch': iepoch,
-                'loss': loss
-        }
-
-        os.makedirs(os.path.join(self.logs_root, 'models'), exist_ok=True)
-        path = os.path.join(self.logs_root, 'models')
-        torch.save(model, os.path.join(path, 'best.pth'))
-
-    def save_decmodel(self, iepoch, loss):
-        model = {
                 'decmodel': self.dec.state_dict(),
                 'epoch': iepoch,
-                'loss': loss
+                'stats': stats
         }
 
         os.makedirs(os.path.join(self.logs_root, 'models'), exist_ok=True)
         path = os.path.join(self.logs_root, 'models')
         torch.save(model, os.path.join(path, 'best.pth'))
+
 
 
     def load_model(self, path):
         model = torch.load(path)
         loaded_epoch = model['epoch']
-        loss = model['loss']
+        stats = model['stats']
 
-        self.model.load_state_dict(model['codebook'])
+        print ("Model loaded from {}, loaded epoch:{} with stats: {}".format(path, loaded_epoch, stats))
+
+        self.modelclass.load_state_dict(model['modelclass'])
+        self.classifier_quantized.load_state_dict(model['discreteclassifier'])
+        self.dec.load_state_dict(model['decmodel'])
 
 
     @torch.no_grad()

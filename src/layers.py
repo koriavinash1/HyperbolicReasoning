@@ -164,6 +164,8 @@ class ResnetBlock2D(nn.Module):
                 x = self.nin_shortcut(x)
 
         return x+h
+
+        
 class StyleVectorizer(nn.Module):
     def __init__(self, emb, depth):
         super(StyleVectorizer).__init__()
@@ -402,11 +404,14 @@ class DiscClassifier(nn.Module):
 
 
         return loss, z_q, zqf, ce, td, hrc, r
+
+
 class VQmodulator(nn.Module):
 
     def __init__(self, *, features,dropout=0.0, z_channels, codebooksize, device):
         super(VQmodulator, self).__init__()
         self.norm1 = nn.BatchNorm2d(features, affine=True)
+
         self.conv1 = torch.nn.Conv2d(features,
                                        z_channels,
                                        kernel_size=1,
@@ -421,7 +426,7 @@ class VQmodulator(nn.Module):
                                       )
         
         self.quantize = VectorQuantizer2DHS(device, codebooksize, z_channels, beta=1.0, sigma=0.1)
-                # self.BottleneckMLP = BottleneckMLP(input = input, hiddendim = hiddendim)
+        # self.BottleneckMLP = BottleneckMLP(input = input, hiddendim = hiddendim)
 
     def forward(self, x):
         x1 = self.norm1(x)
@@ -433,6 +438,7 @@ class VQmodulator(nn.Module):
 
         return loss, z_q, zqf, ce, td, hrc, r
 
+
 class Clamp(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input):
@@ -441,6 +447,8 @@ class Clamp(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         return grad_output.clone()
+
+
 class VectorQuantizer2DHS(nn.Module):
     """
     Improved version over VectorQuantizer, can be used as a drop-in replacement. Mostly
@@ -449,23 +457,50 @@ class VectorQuantizer2DHS(nn.Module):
     # NOTE: due to a bug the beta term was applied to the wrong term. for
     # backwards compatibility we use the buggy version by default, but you can
     # specify legacy=False to fix it.
-    def __init__(self,device,  n_e, e_dim, beta, remap=None, unknown_index="random",
-                 sane_index_shape=False, legacy=True, sigma = 0.1):
+    def __init__(self,
+                    device,  
+                    n_e = 128, 
+                    e_dim = 16, 
+                    beta = 0.9, 
+                    remap=None, 
+                    unknown_index="random",
+                    sane_index_shape=False, 
+                    legacy=True, 
+                    sigma = 0.1):
+
         super().__init__()
+        '''
+        n_e : total number of codebook vectors
+        e_dim: codebook vector dimension
+        beta: factor for legacy term
+
+        '''
         self.n_e = n_e
         self.e_dim = e_dim
         self.beta = beta
         self.legacy = legacy
         self.sigma = sigma
         self.device = device
-        sphere = Hypersphere(dim=16-1)
-        self.embedding = nn.Embedding(self.n_e, 16)
+
+
+        # uniformly sampled initialization
+        sphere = Hypersphere(dim=self.e_dim - 1)
+        self.embedding = nn.Embedding(self.n_e, 
+                                            self.e_dim)
+
+
         points_in_manifold = torch.Tensor(sphere.random_uniform(n_samples=self.n_e))
         self.embedding.weight.data.copy_(points_in_manifold).requires_grad=True
+
         #self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
+
+
         self.hsreg = lambda x: [ torch.norm(x[i]) for i in range(x.shape[0])]
         self.r = torch.nn.Parameter(torch.ones(self.n_e))
         self.ed = lambda x: [torch.norm(x[i]) for i in range(x.shape[0])]
+        
+
+        # remap
         self.remap = remap
         if self.remap is not None:
             self.register_buffer("used", torch.tensor(np.load(self.remap)))
@@ -474,6 +509,7 @@ class VectorQuantizer2DHS(nn.Module):
             if self.unknown_index == "extra":
                 self.unknown_index = self.re_embed
                 self.re_embed = self.re_embed+1
+
             print(f"Remapping {self.n_e} indices to {self.re_embed} indices. "
                   f"Using {self.unknown_index} for unknown indices.")
         else:
@@ -481,12 +517,13 @@ class VectorQuantizer2DHS(nn.Module):
 
         self.sane_index_shape = sane_index_shape
 
+
     def remap_to_used(self, inds):
         ishape = inds.shape
         assert len(ishape)>1
         inds = inds.reshape(ishape[0],-1)
         used = self.used.to(inds)
-        match = (inds[:,:,None]==used[None,None,...]).long()
+        match = (inds[:,:,None]==used[None, None,...]).long()
         new = match.argmax(-1)
         unknown = match.sum(2)<1
         if self.unknown_index == "random":
@@ -499,7 +536,6 @@ class VectorQuantizer2DHS(nn.Module):
         return (d ** 2).mean(1).div(2 * self.sigma ** 2).mul(-1).exp()
 
     def HLoss(self, x):
-
         b = F.softmax(x, dim=1) * F.log_softmax(x, dim=1)
         b = -1.0 * b.sum()
         return b
@@ -515,15 +551,17 @@ class VectorQuantizer2DHS(nn.Module):
         return back.reshape(ishape)
 
     def forward(self, z, temp=None, rescale_logits=False, return_logits=False):
+        
         assert temp is None or temp==1.0, "Only for interface compatible with Gumbel"
         assert rescale_logits==False, "Only for interface compatible with Gumbel"
         assert return_logits==False, "Only for interface compatible with Gumbel"
-        # reshape z -> (batch, height, width, channel) and flatten
-        z = rearrange(z, 'b c h w -> b c h w ').contiguous()
-        z_flattened = z.view(-1, 16)
-        # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
-        #d =  torch.einsum('bd,dn->bn', z_flattened, rearrange(self.embedding.weight, 'n d -> d n'))
         
+        # reshape z -> (batch, height, width, channel) and flatten
+        z = rearrange(z, 'b c h w -> b h w c').contiguous()
+        z_flattened = z.view(-1, self.e_dim)
+        
+
+        # intra distance (gdes-distance) between codebook vector 
         d1 = torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
         ed1 = torch.tensor(self.ed(self.embedding.weight))
         ed1 = ed1.repeat(self.n_e, 1)
@@ -535,24 +573,33 @@ class VectorQuantizer2DHS(nn.Module):
         d1 = torch.acos(edx)
         
         print(d1.shape)
+
+        # d1 = torch.sum(self.embedding.weight ** 2, dim=1, keepdim=True) + \
+        #      torch.sum(self.embedding.weight ** 2, dim=1) - 2 * \
+        #      torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
         
-        d = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + \
-            torch.sum(self.embedding.weight**2, dim=1) - 2 * \
-            torch.einsum('bd,dn->bn', z_flattened, rearrange(self.embedding.weight, 'n d -> d n'))
-        #d1 = torch.sum(self.embedding.weight ** 2, dim=1, keepdim=True) + \
-         #    torch.sum(self.embedding.weight ** 2, dim=1) - 2 * \
-          #   torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
         min_distance = torch.kthvalue(d1, 2, 0)
         total_min_distance = torch.mean(min_distance[0])
         codebookvariance = torch.std(min_distance[0])
+
+
+
+        # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
+        d = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + \
+            torch.sum(self.embedding.weight**2, dim=1) - 2 * \
+            torch.einsum('bd,dn->bn', z_flattened, rearrange(self.embedding.weight, 'n d -> d n'))
+        
         min_encoding_indices = torch.argmin(d, dim=1)
         distances = d[range(d.shape[0]), min_encoding_indices].view(z.shape[0], z.shape[1])
         distances = self.rbf(distances)
 
+
+        # get quantized vector and normalize
         z_q = self.embedding(min_encoding_indices).view(z.shape)
-        #hsreg = lambda x: [1 - torch.norm(x[i]) for i in range(x.shape[0])]
         hsw = torch.Tensor(self.hsreg(self.embedding.weight)).to(self.device)
         hsw = torch.mean(torch.square(self.r - hsw))
+
+
         perplexity = None
         min_encodings = None
         clamp_class = Clamp()
@@ -565,19 +612,21 @@ class VectorQuantizer2DHS(nn.Module):
         else:
             loss = torch.mean((z_q.detach() - z) ** 2) + self.beta * \
                    torch.mean((z_q - z.detach()) ** 2) + hsw  - total_min_distance
+
+
         """
         if not self.legacy:
             loss = self.beta * torch.mean((z_q.detach() - z) ** 2) + hsw - total_min_distance
         else:
             loss = self.beta * torch.mean((z_q - z.detach()) ** 2) +hsw - total_min_distance
         """ 
+
         # preserve gradients
         z_q = z + (z_q - z).detach()
 
         # reshape back to match original input shape
-        z_q = rearrange(z_q, 'b c h w-> b c h w').contiguous()
-        z_flattened1 = z_q.view(z.shape[0],self.e_dim, z_q.shape[2]*z_q.shape[3])
-
+        z_q = rearrange(z_q, 'b h w c-> b c h w').contiguous()
+        z_flattened1 = z_q.view(z.shape[0], self.e_dim, z_q.shape[2]*z_q.shape[3])
 
 
 
@@ -590,7 +639,10 @@ class VectorQuantizer2DHS(nn.Module):
             min_encoding_indices = min_encoding_indices.reshape(
                 z_q.shape[0], z_q.shape[2], z_q.shape[3])
 
-        return z_q, loss, distances, (perplexity, min_encodings, min_encoding_indices), z_flattened1,codebookvariance, total_min_distance,  hsw, torch.mean(self.r)
+        return (z_q, loss, distances, 
+                    (perplexity, min_encodings, min_encoding_indices), 
+                    z_flattened1, codebookvariance, 
+                    total_min_distance,  hsw, torch.mean(self.r))
 
     def get_codebook_entry(self, indices, shape):
         # shape specifying (batch, height, width, channel)
@@ -608,6 +660,9 @@ class VectorQuantizer2DHS(nn.Module):
             z_q = z_q.permute(0, 3, 1, 2).contiguous()
 
         return z_q
+
+
+
 class VectorQuantizer2D(nn.Module):
     """
     Improved version over VectorQuantizer, can be used as a drop-in replacement. Mostly
@@ -730,122 +785,6 @@ class VectorQuantizer2D(nn.Module):
                 z_q.shape[0], z_q.shape[2], z_q.shape[3])
 
         return z_q, loss, distances, (perplexity, min_encodings, min_encoding_indices), z_flattened1, codebookvariance, total_min_distance
-
-    def get_codebook_entry(self, indices, shape):
-        # shape specifying (batch, height, width, channel)
-        if self.remap is not None:
-            indices = indices.reshape(shape[0],-1) # add batch axis
-            indices = self.unmap_to_all(indices)
-            indices = indices.reshape(-1) # flatten again
-
-        # get quantized latent vectors
-        z_q = self.embedding(indices)
-
-        if shape is not None:
-            z_q = z_q.view(shape)
-            # reshape back to match original input shape
-            z_q = z_q.permute(0, 3, 1, 2).contiguous()
-
-        return z_q    
-
-class CodeBook(nn.Module):
-    def __init__(self, nfeatures, nsampling, beta, remap=None, unknown_index="random",
-                 sane_index_shape=False, legacy=True):
-        super(CodeBook).__init__()
-        self.e_dim = nsampling 
-        self.n_e = nfeatures
-        self.beta = beta
-        self.legacy = legacy
-
-        self.entropy = HLoss
-        self.embedding = nn.Embedding(self.n_e, self.e_dim)
-        self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
-
-        self.remap = remap
-        if self.remap is not None:
-            self.register_buffer("used", torch.tensor(np.load(self.remap)))
-            self.re_embed = self.used.shape[0]
-            self.unknown_index = unknown_index # "random" or "extra" or integer
-            if self.unknown_index == "extra":
-                self.unknown_index = self.re_embed
-                self.re_embed = self.re_embed+1
-            print(f"Remapping {self.n_e} indices to {self.re_embed} indices. "
-                  f"Using {self.unknown_index} for unknown indices.")
-        else:
-            self.re_embed = self.n_e
-
-        self.sane_index_shape = sane_index_shape
-
-    def remap_to_used(self, inds):
-        ishape = inds.shape
-        assert len(ishape)>1
-        inds = inds.reshape(ishape[0],-1)
-        used = self.used.to(inds)
-        match = (inds[:,:,None]==used[None,None,...]).long()
-        new = match.argmax(-1)
-        unknown = match.sum(2)<1
-        if self.unknown_index == "random":
-            new[unknown]=torch.randint(0,self.re_embed,size=new[unknown].shape).to(device=new.device)
-        else:
-            new[unknown] = self.unknown_index
-        return new.reshape(ishape)
-
-    def unmap_to_all(self, inds):
-        ishape = inds.shape
-        assert len(ishape)>1
-        inds = inds.reshape(ishape[0],-1)
-        used = self.used.to(inds)
-        if self.re_embed > self.used.shape[0]: # extra token
-            inds[inds>=self.used.shape[0]] = 0 # simply set to zero
-        back=torch.gather(used[None,:][inds.shape[0]*[0],:], 1, inds)
-        return back.reshape(ishape)
-
-    def forward(self, z, temp=None, rescale_logits=False, return_logits=False):
-        assert temp is None or temp==1.0, "Only for interface compatible with Gumbel"
-        assert rescale_logits==False, "Only for interface compatible with Gumbel"
-        assert return_logits==False, "Only for interface compatible with Gumbel"
-        # reshape z -> (batch, height, width, channel) and flatten
-        z = rearrange(z, 'b c h w -> b h w c').contiguous()
-        z_flattened = z.view(-1, self.e_dim)
-        # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
-
-        d = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + \
-            torch.sum(self.embedding.weight**2, dim=1) - 2 * \
-            torch.einsum('bd,dn->bn', z_flattened, rearrange(self.embedding.weight, 'n d -> d n'))
-
-        min_encoding_indices = torch.argmin(d, dim=1)
-        z_q = self.embedding(min_encoding_indices).view(z.shape)
-        perplexity = None
-        min_encodings = None
-
-        # compute loss for embedding
-        if not self.legacy:
-            loss = self.beta * torch.mean((z_q.detach()-z)**2) + \
-                   torch.mean((z_q - z.detach()) ** 2)
-        else:
-            loss = torch.mean((z_q.detach()-z)**2) + self.beta * \
-                   torch.mean((z_q - z.detach()) ** 2)
-
-
-        # entropy regularization
-        loss += self.entropy(z_q)
-
-        # preserve gradients
-        z_q = z + (z_q - z).detach()
-
-        # reshape back to match original input shape
-        z_q = rearrange(z_q, 'b h w c -> b c h w').contiguous()
-
-        if self.remap is not None:
-            min_encoding_indices = min_encoding_indices.reshape(z.shape[0],-1) # add batch axis
-            min_encoding_indices = self.remap_to_used(min_encoding_indices)
-            min_encoding_indices = min_encoding_indices.reshape(-1,1) # flatten
-
-        if self.sane_index_shape:
-            min_encoding_indices = min_encoding_indices.reshape(
-                z_q.shape[0], z_q.shape[2], z_q.shape[3])
-
-        return z_q, loss, (perplexity, min_encodings, min_encoding_indices)
 
     def get_codebook_entry(self, indices, shape):
         # shape specifying (batch, height, width, channel)

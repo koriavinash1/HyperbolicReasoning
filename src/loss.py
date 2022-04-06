@@ -1,6 +1,7 @@
 import torch
 import math
 import torch.nn as nn
+import torch.nn.functional as F
 from hpenalty import hessian_penalty
 from torch.autograd import grad as torch_grad
 
@@ -15,12 +16,14 @@ from torch.autograd import grad as torch_grad
   #  return loss
 
 def recon_loss(logits, target):
-    mse = nn.MSELoss(reduction='mean')
-    l1 = nn.L1Loss(reduction='mean')
+    return 0.99 * F.mse_loss(logits, target) + \
+               0.01 * F.l1_loss(logits, target)
 
 
-    return 0.99 * mse(logits, target) + \
-               0.01 * l1(logits, target)
+def ce_loss(logits, target, label_smoothing=0.0):
+
+    return F.cross_entropy(logits, target, label_smoothing=label_smoothing)
+
 def gradient_penalty(images, output, weight = 10):
     batch_size = images.shape[0]
     gradients = torch_grad(outputs=output, inputs=images,
