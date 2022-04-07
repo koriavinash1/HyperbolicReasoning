@@ -243,7 +243,6 @@ class Trainer():
                                 f" total train loss:%.4f" % loss
                             )
             self.training_pbar.update(batch_idx)
-            break
         pass
 
 
