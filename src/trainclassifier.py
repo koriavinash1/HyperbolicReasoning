@@ -156,7 +156,7 @@ class Trainer():
     def __init__dl(self):
         train_loader, test_loader = get(data_root = self.data_root,
                                                     batch_size = self.batch_size,
-                                                    num_workers=1,
+                                                    num_workers=16,
                                                     input_size = self.input_size)
 
         return train_loader, test_loader
@@ -166,7 +166,6 @@ class Trainer():
 
     def training_step(self, train_loader, epoch):
         
-        self.training_pbar.start()
         for batch_idx, (data, _) in enumerate(train_loader):
 
             data = Variable(data.to(self.device))
@@ -244,8 +243,7 @@ class Trainer():
                                 f" total train loss:%.4f" % loss
                             )
             self.training_pbar.update(batch_idx)
-        self.training_pbar.stop()
-
+            break
         pass
 
 
@@ -255,7 +253,6 @@ class Trainer():
         mean_f1_score = []; mean_acc_score = []
 
 
-        self.validation_pbar.start()
         for batch_idx, (data, _) in enumerate(val_loader):
 
             data = Variable(data.to(self.device))
@@ -283,10 +280,10 @@ class Trainer():
 
             if batch_idx == 1:
                 torchvision.utils.save_image(recon, 
-                                        str(results_dir / f'{str(epoch)}.png'), 
+                                        str(results_dir + f'/{str(epoch)}.png'), 
                                         nrow=int(self.batch_size**0.5))
                 torchvision.utils.save_image(data, 
-                                        str(results_dir / f'{str(epoch)}.png'), 
+                                        str(results_dir + f'/{str(epoch)}.png'), 
                                         nrow=int(self.batch_size**0.5))
 
 
@@ -306,10 +303,10 @@ class Trainer():
             mean_recon_loss_.append(recon_loss_.cpu().numpy())
 
             # acc metrics
-            acc = accuracy_score(torch.argmax(dis_target).cpu().numpy(),
+            acc = accuracy_score(torch.argmax(dis_target, 1).cpu().numpy(),
                                             conti_target.cpu().numpy())
-            f1_ = f1_score(torch.argmax(dis_target).cpu().numpy(),
-                                            conti_target.cpu().numpy())
+            f1_ = f1_score(torch.argmax(dis_target, 1).cpu().numpy(),
+                                            conti_target.cpu().numpy(), average='micro')
 
 
             mean_f1_score.append(f1_)
@@ -324,12 +321,11 @@ class Trainer():
                                 f" total val td avg distance:%.4f" % td +
                                 f" total val cb avg variance:%.4f" % ce +
                                 f" total val loss:%.4f" % loss +
-                                f" F1 dis. w.r.t conti.:%.4f" % loss +
-                                f" Accuracy dis. w.r.t conti.:%.4f" % loss
+                                f" F1:%.4f" % loss +
+                                f" Accuracy:%.4f" % loss
                             )
             self.validation_pbar.update(batch_idx)
 
-        self.validation_pbar.stop()
         return (np.mean(mean_loss), 
                     np.mean(mean_recon_loss_), 
                     np.mean(mean_f1_score), 
@@ -343,6 +339,8 @@ class Trainer():
                                     maxval=len(train_loader))
         self.validation_pbar = progressbar.ProgressBar(widgets=self.validation_widgets, 
                                     maxval=len(valid_loader))
+        self.training_pbar.start()
+        self.validation_pbar.start()
         min_loss = np.inf
         min_recon = np.inf
 
