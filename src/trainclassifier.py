@@ -4,7 +4,7 @@ import os
 from torch import nn
 import fire
 import json
-from layers import DiscAE, DiscClassifier, Decoder, VQmodulator
+from layers import DiscAE, DiscClassifier, Decoder, VQmodulator, HierarchyVQmodulator
 from clsmodel import mnist #, afhq, stl10
 from torch.optim import Adam
 import numpy as np
@@ -12,9 +12,13 @@ from dataset import get
 from torch.optim.lr_scheduler import ReduceLROnPlateau, StepLR
 from torch.autograd import Variable
 import math
+import torchvision
+
 from loss import hpenalty, calc_pl_lengths, recon_loss, ce_loss
 
 from sklearn.metrics import accuracy_score, f1_score
+import progressbar
+
 
 
 class Trainer():
@@ -78,15 +82,18 @@ class Trainer():
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         with torch.no_grad():
-            self.feature_extractor = classifier.features.to(self.device)
-            self.feature_extractor.eval()
+            self.feature_extractor = classifier.features.to(self.device).eval()
+            self.classifier_baseline = classifier.classifier.to(self.device).eval()
+            for p in self.classifier_baseline.parameters(): p.requires_grad = False 
+            for p in self.feature_extractor.parameters(): p.requires_grad = False 
+        
 
-            self.classifier_baseline = classifier.classifier.to(self.device)
-            self.classifier_baseline.eval()
+        # Code book defn
+        # self.modelclass = VQmodulator(features = 64,  z_channels = self.latent_size, codebooksize = self.codebook_length, device = self.device).to(self.device)
+        self.modelclass = HierarchyVQmodulator(features = 64,  z_channels = self.latent_size, codebooksize = self.codebook_length, device = self.device).to(self.device)
         
-        self.modelclass = VQmodulator(features = 64,  z_channels = self.latent_size, codebooksize = self.codebook_length, device = self.device).to(self.device)
-        
-        self.inchannel = math.prod(self.latentdim)        
+        # Quantized classifier
+        self.inchannel = np.prod(self.latentdim)        
         clfq = []
         clfq.append(nn.Linear(self.inchannel, hiddendim))
         clfq.append(nn.Linear(hiddendim, self.nclasses ))
@@ -94,21 +101,49 @@ class Trainer():
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
 
 
-        self.opt = Adam(list(self.modelclass.parameters()) +list(self.classifier_quantized.parameters()),
+
+        # Optimizers
+        self.opt = Adam(list(self.modelclass.parameters()) + list(self.classifier_quantized.parameters()),
                         lr=self.lr,
                         weight_decay=self.wd)
         self.LR_sch = ReduceLROnPlateau(self.opt)
 
 
-        self.dec = Decoder(ch=ch, ch_mult=ch_mult, num_res_blocks=num_res_blocks, input=self.latentdim, hiddendim=hiddendim,
-                           dropout=dropout, out_ch=out_ch, resamp_with_conv=resamp_with_conv, in_channels=in_channels,
-                           z_channels=self.latent_size).to(self.device)
+
+        # Decoder and optimizer
+        self.dec = Decoder(ch=ch, 
+                            ch_mult=ch_mult, 
+                            num_res_blocks=num_res_blocks, 
+                            input=self.latentdim, 
+                            hiddendim=hiddendim,
+                            dropout=dropout, 
+                            out_ch=out_ch, 
+                            resamp_with_conv=resamp_with_conv, 
+                            in_channels=in_channels,
+                            z_channels=self.latent_size).to(self.device)
         self.opt2 = Adam(self.dec.parameters(),
                         lr=self.lr,
                         weight_decay=self.wd)
         self.LR_sch2 = ReduceLROnPlateau(self.opt2)
 
 
+        # number of parameters
+        print ('FeatureExtractor: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.feature_extractor.parameters() if p.requires_grad), sum(p.numel() for p in self.feature_extractor.parameters())))
+        print ('ContiClassifier: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.classifier_baseline.parameters() if p.requires_grad), sum(p.numel() for p in self.classifier_baseline.parameters())))
+        print ('DisClassifier: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.modelclass.parameters() if p.requires_grad), sum(p.numel() for p in self.modelclass.parameters())))
+        print ('CodeBook: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.classifier_quantized.parameters() if p.requires_grad), sum(p.numel() for p in self.classifier_quantized.parameters())))
+ 
+
+        self.training_widgets = [progressbar.FormatLabel(''),
+           progressbar.Bar('*'),' (',
+           progressbar.ETA(), ') ',
+          ]
+
+
+        self.validation_widgets = [progressbar.FormatLabel(''),
+           progressbar.Bar('*'),' (',
+           progressbar.ETA(), ') ',
+          ]
 
     def cq(self, hd):
         h = hd.view(hd.size(0), -1)
@@ -130,7 +165,8 @@ class Trainer():
 
 
     def training_step(self, train_loader, epoch):
-
+        
+        self.training_pbar.start()
         for batch_idx, (data, _) in enumerate(train_loader):
 
             data = Variable(data.to(self.device))
@@ -150,7 +186,6 @@ class Trainer():
 
             # code book sampling
             quant_loss, latent_features, zqf, ce , td, hrc, r = self.modelclass(f)
-            qloss = quant_loss - hrc + td
 
             dis_target = m(self.cq(latent_features))
 
@@ -158,7 +193,7 @@ class Trainer():
             class_loss_ = ce_loss(logits = dis_target, target = conti_target)
 
 
-            loss = class_loss_ +  quant_loss + ce
+            loss = class_loss_ +  quant_loss #quant_loss = quant_loss + cb_disentanglement_loss
             loss.backward()
             self.opt.step()
 
@@ -190,26 +225,26 @@ class Trainer():
             # for p in self.classifier_quantized.parameters(): p.requires_grad = False
             # recon_loss between continious and discrete features
             # for p  in self.modelclass.parameters(): p.requires_grad = True
-            # for p in self.classifier_quantized.parameters(): p.requires_grad = True 
 
 
             with torch.no_grad():
                  self.modelclass.quantize.r.clamp_(0.9, 1.1)
 
-
-            print(
-                f"train epoch:%.1f" % epoch,
-                f"train reconloss:%.4f" % recon_loss_,
-                f"train qloss:%.4f" % qloss,
-                f"radius:%.4f" % r,
-                f"hypersphereloss train:%.4f" % hrc,
-            #    f"train disentanglement_loss:%.4f" % disentanglement_loss,
-             #   f"train disentanglement_classloss:%.4f" % disentanglement_classloss,
-                f"train classloss:%.4f" % class_loss_,
-                f"total train cb avg distance:%.4f" % td,
-                f"total train cb avg variance:%.4f" % ce,
-                f"total train loss:%.4f" % loss
-            )
+            self.training_widgets[0] = progressbar.FormatLabel(
+                                f" train epoch:%.1f" % epoch +
+                                f" train classloss:%.4f" % class_loss_ +
+                                f" train reconloss:%.4f" % recon_loss_ +
+                                f" train qloss:%.4f" % quant_loss +
+                                f" radius:%.4f" % r +
+                                f" hypersphereloss train:%.4f" % hrc +
+                                # f" train disentanglement_loss:%.4f" % disentanglement_loss +
+                                # f" train disentanglement_classloss:%.4f" % disentanglement_classloss +
+                                f" total train cb avg distance:%.4f" % td +
+                                f" total train cb avg variance:%.4f" % ce +
+                                f" total train loss:%.4f" % loss
+                            )
+            self.training_pbar.update(batch_idx)
+        self.training_pbar.stop()
 
         pass
 
@@ -219,6 +254,8 @@ class Trainer():
         mean_loss = []; mean_recon_loss_ = []
         mean_f1_score = []; mean_acc_score = []
 
+
+        self.validation_pbar.start()
         for batch_idx, (data, _) in enumerate(val_loader):
 
             data = Variable(data.to(self.device))
@@ -278,18 +315,21 @@ class Trainer():
             mean_f1_score.append(f1_)
             mean_acc_score.append(acc)
 
-            print(
-                f"val epoch:%.1f" % epoch,
-                f"val reconloss:%.4f" % recon_loss_,
-                f"hypersphereloss val:%.4f" % hrc,
-               # f" val disentanglement_loss:%.4f" % disentanglement_loss,
-                f"val classloss:%.4f" % class_loss_,
-                f"total val td avg distance:%.4f" % td,
-                f"total val cb avg variance:%.4f" % ce,
-                f"total val loss:%.4f" % loss,
-                f"F1 dis. w.r.t conti.:%.4f" % loss,
-                f"Accuracy dis. w.r.t conti.:%.4f" % loss,
-            )
+            self.validation_widgets[0] = progressbar.FormatLabel(
+                                f" val epoch:%.1f" % epoch +
+                                f" val reconloss:%.4f" % recon_loss_ +
+                                f" hypersphereloss val:%.4f" % hrc + 
+                                # f" val disentanglement_loss:%.4f" % disentanglement_loss +
+                                f" val classloss:%.4f" % class_loss_ +
+                                f" total val td avg distance:%.4f" % td +
+                                f" total val cb avg variance:%.4f" % ce +
+                                f" total val loss:%.4f" % loss +
+                                f" F1 dis. w.r.t conti.:%.4f" % loss +
+                                f" Accuracy dis. w.r.t conti.:%.4f" % loss
+                            )
+            self.validation_pbar.update(batch_idx)
+
+        self.validation_pbar.stop()
         return (np.mean(mean_loss), 
                     np.mean(mean_recon_loss_), 
                     np.mean(mean_f1_score), 
@@ -299,14 +339,24 @@ class Trainer():
     def train(self):
         train_loader, valid_loader = self.__init__dl()
 
+        self.training_pbar = progressbar.ProgressBar(widgets=self.training_widgets, 
+                                    maxval=len(train_loader))
+        self.validation_pbar = progressbar.ProgressBar(widgets=self.validation_widgets, 
+                                    maxval=len(valid_loader))
         min_loss = np.inf
         min_recon = np.inf
+
+
+
         for iepoch in range(self.nepochs):
 
             self.training_step(train_loader, iepoch)
             loss, rloss, f1, acc  = self.validation_step(valid_loader, iepoch)
 
             stats = {'loss': loss, 'f1': f1, 'acc': acc, 'rloss': rloss}
+            print ('Epoch: {}. Stats: {}'.format(iepoch, stats))
+
+
             if loss < min_loss:
                 self.save_classmodel(iepoch, stats)
                 min_loss = loss
@@ -353,7 +403,7 @@ class Trainer():
 
 
 def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNISTv0/TI/data',
-                      logs_root='/vol/biomedic3/as217/symbolicAI/SymbolicInterpretability/logs',
+                      logs_root='../logs',
                       name='default',
                       image_size=(32,32),
                       style_depth=16,

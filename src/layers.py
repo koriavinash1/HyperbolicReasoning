@@ -1,6 +1,7 @@
 import torch
 import math
 from torch import nn
+import numpy as np
 import torch.nn.functional as F
 from einops import rearrange
 import geomstats.backend as gs
@@ -286,7 +287,7 @@ class Decoder(nn.Module):
             self.num_resolutions = len(ch_mult)
             block_in = ch * ch_mult[self.num_resolutions - 1]
             self.input = input
-            self.inchannel = math.prod(self.input)
+            self.inchannel = np.prod(self.input)
             self.hiddendim = hiddendim
             self.fc1 = nn.Linear(self.inchannel, self.hiddendim)
             self.fc2 = nn.Linear(self.hiddendim, self.inchannel)
@@ -442,7 +443,7 @@ class VQmodulator(nn.Module):
 
 class HierarchyVQmodulator(nn.Module):
 
-    def __init__(self, *, features,dropout=0.0, z_channels, codebooksize, device):
+    def __init__(self, *, features, dropout=0.0, z_channels, codebooksize, device):
         super(HierarchyVQmodulator, self).__init__()
         self.norm1 = nn.BatchNorm2d(features, affine=True)
 
@@ -474,6 +475,10 @@ class HierarchyVQmodulator(nn.Module):
 
         # self.BottleneckMLP = BottleneckMLP(input = input, hiddendim = hiddendim)
 
+        self.z_channels = z_channels
+
+    def attention(self, w, x):
+        return (w * x.view(-1, self.z_channels)).view(x.shape)
 
 
     def forward(self, x):
@@ -484,16 +489,16 @@ class HierarchyVQmodulator(nn.Module):
         x2 = self.conv2(x1)
 
         z_q1, loss1, distances, info, zqf1, ce1, td1, hrc1, r1 = self.quantize(x2)
-        z_q1 = x2 + self.q1w * z_q1 
+        z_q1 = x2 + self.attention(self.q1w, z_q1) 
 
         z_q2, loss2, distances, info, zqf2, ce2, td2, hrc2, r2 = self.quantize1(z_q1)
-        z_q2 = z_q1 + self.q2w * z_q2 
+        z_q2 = z_q1 + self.attention(self.q2w, z_q2) 
         
         z_q3, loss3, distances, info, zqf3, ce3, td3, hrc3, r3 = self.quantize2(z_q2)
-        z_q3 = z_q2 + self.q3w * z_q3 
+        z_q3 = z_q2 + self.attention(self.q3w, z_q3) 
         
         z_q4, loss4, distances, info, zqf4, ce4, td4, hrc4, r4 = self.quantize3(z_q3)
-        z_q4 = z_q3 + self.q4w * z_q4
+        z_q4 = z_q3 + self.attention(self.q4w, z_q4)
         
 
         loss = 0.25*(loss1 + loss2 + loss3 + loss4)
@@ -639,7 +644,6 @@ class VectorQuantizer2DHS(nn.Module):
         # d = torch.acos(d)
         d1 = torch.acos(edx)
         
-        print(d1.shape)
 
         # d1 = torch.sum(self.embedding.weight ** 2, dim=1, keepdim=True) + \
         #      torch.sum(self.embedding.weight ** 2, dim=1) - 2 * \
@@ -647,8 +651,8 @@ class VectorQuantizer2DHS(nn.Module):
         
         min_distance = torch.kthvalue(d1, 2, 0)
         total_min_distance = torch.mean(min_distance[0])
-        codebookvariance = torch.std(min_distance[0])
-
+        codebookvariance = torch.mean(torch.var(d1, 1))
+        # codebookvariance = torch.var(min_distance[0])
 
 
         # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
@@ -657,8 +661,8 @@ class VectorQuantizer2DHS(nn.Module):
             torch.einsum('bd,dn->bn', z_flattened, rearrange(self.embedding.weight, 'n d -> d n'))
         
         min_encoding_indices = torch.argmin(d, dim=1)
-        distances = d[range(d.shape[0]), min_encoding_indices].view(z.shape[0], z.shape[1])
-        distances = self.rbf(distances)
+        # distances = d[range(d.shape[0]), min_encoding_indices].view(z.shape[0], z.shape[1])
+        # distances = self.rbf(distances)
 
 
         # get quantized vector and normalize
@@ -675,11 +679,13 @@ class VectorQuantizer2DHS(nn.Module):
          
         if not self.legacy:
             loss = self.beta * torch.mean((z_q.detach() - z) ** 2) + \
-                   torch.mean((z_q - z.detach()) ** 2) + hsw - total_min_distance
+                   torch.mean((z_q - z.detach()) ** 2) + hsw
         else:
             loss = torch.mean((z_q.detach() - z) ** 2) + self.beta * \
-                   torch.mean((z_q - z.detach()) ** 2) + hsw  - total_min_distance
+                   torch.mean((z_q - z.detach()) ** 2) + hsw 
 
+
+        disentanglement_loss = codebookvariance - total_min_distance
 
         """
         if not self.legacy:
@@ -706,10 +712,11 @@ class VectorQuantizer2DHS(nn.Module):
             min_encoding_indices = min_encoding_indices.reshape(
                 z_q.shape[0], z_q.shape[2], z_q.shape[3])
 
-        return (z_q, loss, distances, 
+        return (z_q, loss + disentanglement_loss, 0, 
                     (perplexity, min_encodings, min_encoding_indices), 
                     z_flattened1, codebookvariance, 
                     total_min_distance,  hsw, torch.mean(self.r))
+                    
 
     def get_codebook_entry(self, indices, shape):
         # shape specifying (batch, height, width, channel)
