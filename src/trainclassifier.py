@@ -1,3 +1,4 @@
+from base64 import decode
 from click import style
 import torch
 import os
@@ -74,6 +75,9 @@ class Trainer():
         self.logs_root = logs_root
         self.input_size = image_size
         self.num_workers = num_workers
+
+
+        self.trim = True
         self.__init__dl()
         print(torch.cuda.is_available())
 
@@ -93,7 +97,7 @@ class Trainer():
         self.modelclass = HierarchyVQmodulator(features = 64,  z_channels = self.latent_size, codebooksize = self.codebook_length, device = self.device).to(self.device)
         
         # Quantized classifier
-        self.inchannel = np.prod(self.latentdim)        
+        self.inchannel = self.latent_size  if self.trim else np.prod(self.latentdim)      
         clfq = []
         clfq.append(nn.Linear(self.inchannel, hiddendim))
         clfq.append(nn.Linear(hiddendim, self.nclasses ))
@@ -184,12 +188,16 @@ class Trainer():
                 
 
             # code book sampling
-            quant_loss, latent_features, zqf, ce , td, hrc, r = self.modelclass(f)
+            quant_loss, classifier_features, decoder_features, ce , td, hrc, r = self.modelclass(f)
+            
+            if not self.trim:
+                decoder_features = classifier_features
 
-            dis_target = m(self.cq(latent_features))
 
-            # class_loss_ = recon_loss(logits = dis_target, target = conti_target)
+
+            dis_target = m(self.cq(classifier_features))
             class_loss_ = ce_loss(logits = dis_target, target = conti_target)
+            # class_loss_ = recon_loss(logits = dis_target, target = conti_target)
 
 
             loss = class_loss_ +  quant_loss #quant_loss = quant_loss + cb_disentanglement_loss
@@ -213,7 +221,7 @@ class Trainer():
             #loss.backward(retain_graph = True)
 
 
-            recon = self.dec(latent_features.detach())
+            recon = self.dec(decoder_features.detach())
             recon_loss_ = recon_loss(logits = recon, target = data)
             recon_loss_.backward()
             self.opt2.step()
@@ -268,10 +276,13 @@ class Trainer():
 
 
             # code book sampling
-            quant_loss, latent_features, zqf, ce , td, hrc, r = self.modelclass(features)
+            quant_loss, classifier_features, decoder_features, ce , td, hrc, r = self.modelclass(features)
+            
+            if not self.trim:
+                decoder_features = classifier_features
 
-            dis_target = m(self.cq(latent_features))
-            recon = self.dec(latent_features)
+            dis_target = m(self.cq(classifier_features))
+            recon = self.dec(decoder_features)
 
             # save sample reconstructions
             results_dir = os.path.join(self.logs_root, 'recon_imgs')

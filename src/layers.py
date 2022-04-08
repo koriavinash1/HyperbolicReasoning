@@ -543,13 +543,13 @@ class HierarchyVQmodulator(nn.Module):
         z_q4 = self.attention(z_q3, self.q4w, z_q4, self.q4conv)
 
         loss = 0.25*(loss1 + loss2 + loss3 + loss4)
-        zqf = 0.25*(zqf1 + zqf2 + zqf3 + zqf4) 
+        # zqf = 0.25*(zqf1 + zqf2 + zqf3 + zqf4) 
         ce = 0.25*(ce1 + ce2 + ce3 + ce4) 
         td = 0.25*(td1 + td2 + td3 + td4) 
         hrc = 0.25*(hrc1 + hrc2 + hrc3 + hrc4) 
         r = 0.25*(r1 + r2 + r3 + r4)
 
-        return loss, z_q4, zqf, ce, td, hrc, r
+        return loss, z_q4, z_q1, ce, td, hrc, r
 
 
 class Clamp(torch.autograd.Function):
@@ -916,4 +916,4 @@ class VectorQuantizer2D(nn.Module):
             # reshape back to match original input shape
             z_q = z_q.permute(0, 3, 1, 2).contiguous()
 
-        return z_q                                   
+        return z_q
