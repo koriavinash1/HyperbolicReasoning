@@ -279,10 +279,10 @@ class Trainer():
 
             if batch_idx == 1:
                 torchvision.utils.save_image(recon, 
-                                        str(results_dir + f'/{str(epoch)}.png'), 
+                                        str(results_dir + f'/{str(epoch)}-recon.png'), 
                                         nrow=int(self.batch_size**0.5))
                 torchvision.utils.save_image(data, 
-                                        str(results_dir + f'/{str(epoch)}.png'), 
+                                        str(results_dir + f'/{str(epoch)}-orig.png'), 
                                         nrow=int(self.batch_size**0.5))
 
 
@@ -320,8 +320,8 @@ class Trainer():
                                 f" total val td avg distance:%.4f" % td +
                                 f" total val cb avg variance:%.4f" % ce +
                                 f" total val loss:%.4f" % loss +
-                                f" F1:%.4f" % loss +
-                                f" Accuracy:%.4f" % loss
+                                f" F1:%.4f" % f1_ +
+                                f" Accuracy:%.4f" % acc
                             )
             self.validation_pbar.update(batch_idx)
 
@@ -401,7 +401,7 @@ class Trainer():
 
 def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNISTv0/TI/data',
                       logs_root='../logs',
-                      name='default',
+                      name='default2',
                       image_size=(32,32),
                       style_depth=16,
                       batch_size=50,
@@ -418,7 +418,7 @@ def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNI
                       pl_weightage=1.0,
                       seed=42,
                       nclasses=10,
-                      latent_dim=64,
+                      latent_dim=8,
                       log=True,
                       ch=32,
                       out_ch=3,
@@ -462,6 +462,7 @@ def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNI
     )
 
     os.makedirs(os.path.join(logs_root, name), exist_ok=True)
+    model_args['logs_root'] = os.path.join(logs_root, name)
     with open(os.path.join(logs_root, name, 'exp-config.json'), 'w') as f:
         json.dump(model_args, f, indent=4)
 

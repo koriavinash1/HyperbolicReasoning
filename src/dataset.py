@@ -102,7 +102,8 @@ class DataGenerator(data.Dataset):
 
         self.root = root
         self.imgs = imgs#[:50]
-        self.classes = classes#[:50]
+        np.random.shuffle(self.imgs)
+        self.classes = classes
         self.num_class = len(classes)
         self.num_channels = 3
         self.class_to_idx = class_to_idx
