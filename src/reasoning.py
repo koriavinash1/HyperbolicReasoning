@@ -8,6 +8,8 @@ from torch import Tensor
 from torch.autograd import Function
 from torch.optim.optimizer import Optimizer
 from torch.optim import Adam
+from collections import OrderedDict
+
 
 ################################################################################
 
@@ -207,17 +209,20 @@ class Reasoning(nn.Module):
         self.ar = ar
         self.lr = lr 
         self.threshold = threshold
-        self.layers = nn.ModuleList() 
+        self.layers = nn.ModuleList([]) 
         for il in range(len(layers) - 1):
+            block1 = []
             binary = BinaryLinear(layers[il], 
                                             layers[il +1], 
                                             bias=True, 
                                             binarize_input=True)
-            self.layers.add_module("binary{}".format(il), binary)
-
+            
+            block1.append(("binary{}".format(il), binary))
             if il < len(layers) - 2:
                 bn = nn.BatchNorm1d(layers[il +1])
-                self.layers.add_module("bn{}".format(il), bn)
+                block1.append(("bn{}".format(il), bn))
+
+            self.layers.append(nn.Sequential(OrderedDict(block1)))
 
         
         self.opt = MomentumWithThresholdBinaryOptimizer(
@@ -227,6 +232,7 @@ class Reasoning(nn.Module):
                     threshold=self.threshold,
                     adam_lr=self.lr,
                 )
+
 
 
     def binary_parameters(self):
@@ -244,8 +250,9 @@ class Reasoning(nn.Module):
         be_loss = 0
         ce_loss = 0
 
+        x = [xi.to(y.device) for xi in x]
         input_ = x[0]
-        for i, block in enumerate(self.layers[::-1]):
+        for i, block in enumerate(self.layers[:-1]):
             input_ = block(input_)
             be_loss += self.bce_loss(input_, x[i +1])
 
@@ -264,12 +271,14 @@ class Reasoning(nn.Module):
         return f.cross_entropy(p, y, label_smoothing=0.1)
 
     def bce_loss(self, p, y):
-        return f.binary_cross_entropy_with_logits(p, y, label_smoothing =0.1)
+        return f.binary_cross_entropy_with_logits(p, y)
 
     @torch.no_grad()
     def val_step(self, x, y):
         be_loss = 0
         ce_loss = 0
+        
+        x = [xi.to(y.device) for xi in x]
 
         input_ = x[0]
         for i, block in enumerate(self.layers[::-1]):
@@ -281,5 +290,5 @@ class Reasoning(nn.Module):
 
 
         loss = ce_loss + be_loss
-        return loss
+        return 0.2*loss
  

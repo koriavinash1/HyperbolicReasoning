@@ -516,7 +516,6 @@ class HierarchyVQmodulator(nn.Module):
         self.emb_dim = emb_dim 
 
     def attention(self, input_,  w, x, conv=None):
-        print (input_.shape, x.shape, w.shape)
         x = input_ + (w * x.view(-1, self.emb_dim)).view(x.shape)
 
         if not (conv is None):
@@ -746,15 +745,14 @@ class VectorQuantizer2DHS(nn.Module):
         # z_q = rearrange(z_q, 'b h w c-> b c h w').contiguous()
 
 
-        if self.remap is not None:
-            min_encoding_indices = min_encoding_indices.reshape(z.shape[0],-1) # add batch axis
-            min_encoding_indices = self.remap_to_used(min_encoding_indices)
-            min_encoding_indices = min_encoding_indices.reshape(-1,1) # flatten
+        # if self.remap is not None:
+        #     min_encoding_indices = min_encoding_indices.reshape(z.shape[0],-1) # add batch axis
+        #     min_encoding_indices = self.remap_to_used(min_encoding_indices)
+        #     min_encoding_indices = min_encoding_indices.reshape(-1,1) # flatten
 
-        if self.sane_index_shape:
-            min_encoding_indices = min_encoding_indices.reshape(
-                z_q.shape[0], z_q.shape[2], z_q.shape[3])
-
+        # if self.sane_index_shape:
+        #     min_encoding_indices = min_encoding_indices.reshape(
+        #         z_q.shape[0], z_q.shape[2], z_q.shape[3])
 
 
         sampled_idx = torch.zeros(z.shape[0]*self.n_e)
