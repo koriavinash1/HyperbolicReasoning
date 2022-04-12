@@ -598,7 +598,6 @@ class VectorQuantizer2DHS(nn.Module):
         self.legacy = legacy
         self.sigma = sigma
         self.device = device
-<<<<<<< HEAD:src/layer2.py
         #sphere = Hypersphere(dim=16-1)
         #self.embedding = nn.Embedding(self.n_e, 16)
         #sphere = Hypersphere(self.e_dim-1)
@@ -606,22 +605,6 @@ class VectorQuantizer2DHS(nn.Module):
         #points_in_manifold = torch.Tensor(sphere.random_uniform(n_samples=self.n_e))
         #self.embedding.weight.data.copy_(points_in_manifold).requires_grad=True
         self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
-=======
-
-
-        # uniformly sampled initialization
-        sphere = Hypersphere(dim=self.e_dim - 1)
-        self.embedding = nn.Embedding(self.n_e, 
-                                            self.e_dim)
-
-
-        points_in_manifold = torch.Tensor(sphere.random_uniform(n_samples=self.n_e))
-        self.embedding.weight.data.copy_(points_in_manifold).requires_grad=True
-
-        #self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
-
-
->>>>>>> bec013bcdba6b505127ee2ae50f899cfcad6950b:src/layers.py
         self.hsreg = lambda x: [ torch.norm(x[i]) for i in range(x.shape[0])]
         self.r = torch.nn.Parameter(torch.ones(self.n_e)).to(device)
         self.ed = lambda x: [torch.norm(x[i]) for i in range(x.shape[0])]
@@ -685,17 +668,12 @@ class VectorQuantizer2DHS(nn.Module):
         assert return_logits==False, "Only for interface compatible with Gumbel"
         
         # reshape z -> (batch, height, width, channel) and flatten
-<<<<<<< HEAD:src/layer2.py
         #z = rearrange(z, 'b c h w -> b c h w ').contiguous()
         #z_flattened = z.view(-1, 16)
         z = rearrange(z, 'b c h w -> b h w c').contiguous()
         z_flattened = z.view(-1, self.e_dim)
         # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
         #d =  torch.einsum('bd,dn->bn', z_flattened, rearrange(self.embedding.weight, 'n d -> d n'))
-=======
-        # z = rearrange(z, 'b c h w -> b h w c').contiguous()
-        z_flattened = z.view(-1, self.e_dim)
->>>>>>> bec013bcdba6b505127ee2ae50f899cfcad6950b:src/layers.py
         
 
         # intra distance (gdes-distance) between codebook vector 
@@ -709,13 +687,6 @@ class VectorQuantizer2DHS(nn.Module):
         # d = torch.acos(d)
         d1 = torch.acos(edx)
         
-<<<<<<< HEAD:src/layer2.py
-=======
-
-        # d1 = torch.sum(self.embedding.weight ** 2, dim=1, keepdim=True) + \
-        #      torch.sum(self.embedding.weight ** 2, dim=1) - 2 * \
-        #      torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
->>>>>>> bec013bcdba6b505127ee2ae50f899cfcad6950b:src/layers.py
         
         min_distance = torch.kthvalue(d1, 2, 0)
         total_min_distance = torch.mean(min_distance[0])
@@ -729,15 +700,9 @@ class VectorQuantizer2DHS(nn.Module):
             torch.einsum('bd,dn->bn', z_flattened, rearrange(self.embedding.weight, 'n d -> d n'))
         
         min_encoding_indices = torch.argmin(d, dim=1)
-<<<<<<< HEAD:src/layer2.py
         #distances = d[range(d.shape[0]), min_encoding_indices].view(z.shape[0], z.shape[1])
         distances = d[range(d.shape[0]), min_encoding_indices].view(z.shape[0], z.shape[1], z.shape[2])
         distances = self.rbf(distances)
-=======
-        # distances = d[range(d.shape[0]), min_encoding_indices].view(z.shape[0], z.shape[1])
-        # distances = self.rbf(distances)
-
->>>>>>> bec013bcdba6b505127ee2ae50f899cfcad6950b:src/layers.py
 
         # get quantized vector and normalize
         z_q = self.embedding(min_encoding_indices).view(z.shape)
@@ -771,7 +736,6 @@ class VectorQuantizer2DHS(nn.Module):
         z_q = z + (z_q - z).detach()
 
         # reshape back to match original input shape
-<<<<<<< HEAD:src/layer2.py
         #z_q = rearrange(z_q, 'b c h w-> b c h w').contiguous()
         #z_flattened1 = z_q.view(z.shape[0],self.e_dim, z_q.shape[2]*z_q.shape[3])
 
@@ -1102,9 +1066,6 @@ class VectorQuantizer2DHB(nn.Module):
         z_ql = rearrange(z_ql, 'b h w c -> b c h w').contiguous()        
 
 
-=======
-        # z_q = rearrange(z_q, 'b h w c-> b c h w').contiguous()
->>>>>>> bec013bcdba6b505127ee2ae50f899cfcad6950b:src/layers.py
 
 
         if self.remap is not None:
@@ -1116,22 +1077,7 @@ class VectorQuantizer2DHB(nn.Module):
             min_encoding_indices = min_encoding_indices.reshape(
                 z_q.shape[0], z_q.shape[2], z_q.shape[3])
 
-<<<<<<< HEAD:src/layer2.py
         return z_q, loss, distances, (perplexity, min_encodings, min_encoding_indices), mean_min_distance, z_ql, minenc
-=======
-
-
-        sampled_idx = torch.zeros(z.shape[0]*self.n_e)
-        sampled_idx[min_encoding_indices] = 1
-        sampled_idx = sampled_idx.view(z.shape[0], self.n_e)
-        return (z_q, loss + disentanglement_loss,
-                    sampled_idx, 
-                    codebookvariance, 
-                    total_min_distance,  
-                    hsw, 
-                    torch.mean(self.r))
-                    
->>>>>>> bec013bcdba6b505127ee2ae50f899cfcad6950b:src/layers.py
 
     def get_codebook_entry(self, indices, shape):
         # shape specifying (batch, height, width, channel)
@@ -1150,7 +1096,6 @@ class VectorQuantizer2DHB(nn.Module):
 
         return z_q
 
-<<<<<<< HEAD:src/layer2.py
 class modulator(nn.Module):
 
     def __init__(self, *,
@@ -1277,10 +1222,6 @@ class HierarchyVQhb(nn.Module):
 
 
         return loss, z_q4, z_ql4, td4, totaldistance, pred, output
-=======
-
-
->>>>>>> bec013bcdba6b505127ee2ae50f899cfcad6950b:src/layers.py
 class VectorQuantizer2D(nn.Module):
     """
     Improved version over VectorQuantizer, can be used as a drop-in replacement. Mostly
