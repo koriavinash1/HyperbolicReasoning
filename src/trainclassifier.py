@@ -119,7 +119,7 @@ class Trainer():
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
 
         # Reasoning Module
-        self.reasoning = Reasoning(layers=codebook_size)
+        self.reasoning = Reasoning(layers=codebook_size).to(self.device)
 
 
         # Optimizers
@@ -206,10 +206,10 @@ class Trainer():
             # code book sampling
             quant_loss, features, feature_idxs, ce , td, hrc, r = self.modelclass(f)
 
-            print (data.shape) 
-            print (f.shape)
-            [print(f.shape) for f in features]
-            [print(f.shape, torch.sum(f)) for f in feature_idxs]
+            # print (data.shape) 
+            # print (f.shape)
+            # [print(f.shape) for f in features]
+            # [print(f.shape, torch.sum(f)) for f in feature_idxs]
             if isinstance(features, list):
                 classifier_features = features[-1]
                 decoder_features = features[0]
@@ -251,8 +251,8 @@ class Trainer():
 
             # Reasoning pass
             reasoning_loss = 0
-            if epoch > 10:
-                reasoning_loss = self.reasoning(feature_idxs.detach(), conti_target)
+            if epoch >= 0:
+                reasoning_loss = self.reasoning.train_step(feature_idxs, conti_target)
 
             with torch.no_grad():
                  self.modelclass.quantize.r.clamp_(0.9, 1.1)
@@ -339,8 +339,8 @@ class Trainer():
 
               # Reasoning pass
             reasoning_loss = 0
-            if epoch > 10:
-                reasoning_loss = self.reasoning(feature_idxs.detach(), conti_target)
+            if epoch >= 0:
+                reasoning_loss = self.reasoning.val_step(feature_idxs, conti_target)
 
 
             # acc metrics
