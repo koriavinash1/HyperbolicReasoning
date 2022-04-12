@@ -16,7 +16,7 @@ import math
 import torchvision
 
 from loss import hpenalty, calc_pl_lengths, recon_loss, ce_loss
-
+from reasoning import Reasoning
 from sklearn.metrics import accuracy_score, f1_score
 import progressbar
 
@@ -54,8 +54,7 @@ class Trainer():
                     dropout=0.0,
                     resamp_with_conv=True,
                     in_channels =3,
-
-                    hiddendim = 256,
+                    hiddendim = 64,
                     log = False):
 
         self.codebook_length = codebook_length
@@ -69,6 +68,8 @@ class Trainer():
 
         map = lambda x, y: [x[i]//y[-1] for i in range(len(x))]
         self.latentdim = [self.latent_size]+map(image_size, ch_mult)
+        self.emb_dim = int(np.prod(map(image_size, ch_mult)))
+
         self.nepochs = nepochs
         self.batch_size = batch_size
         self.data_root = data_root
@@ -93,17 +94,32 @@ class Trainer():
         
 
         # Code book defn
-        # self.modelclass = VQmodulator(features = 64,  z_channels = self.latent_size, codebooksize = self.codebook_length, device = self.device).to(self.device)
-        self.modelclass = HierarchyVQmodulator(features = 64,  z_channels = self.latent_size, codebooksize = self.codebook_length, device = self.device).to(self.device)
+        # self.modelclass = VQmodulator(features = 64,  
+#                                        z_channels = self.latent_size, 
+#                                        codebooksize = self.codebook_length, 
+#                                        device = self.device).to(self.device)
+
+
+        codebook_size = [self.codebook_length, 
+                                    self.codebook_length//2,  
+                                    self.codebook_length//4,
+                                    self.nclasses]
+        self.modelclass = HierarchyVQmodulator(features = 64,  
+                                                z_channels = 64, 
+                                                emb_dim = self.emb_dim,
+                                                codebooksize = codebook_size, 
+                                                device = self.device).to(self.device)
         
         # Quantized classifier
-        self.inchannel = self.latent_size  if self.trim else np.prod(self.latentdim)      
+        self.inchannel = self.emb_dim  if self.trim else np.prod(self.latentdim)      
         clfq = []
         clfq.append(nn.Linear(self.inchannel, hiddendim))
         clfq.append(nn.Linear(hiddendim, self.nclasses ))
         
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
 
+        # Reasoning Module
+        self.reasoning = Reasoning(layers=codebook_size)
 
 
         # Optimizers
@@ -124,7 +140,7 @@ class Trainer():
                             out_ch=out_ch, 
                             resamp_with_conv=resamp_with_conv, 
                             in_channels=in_channels,
-                            z_channels=self.latent_size).to(self.device)
+                            z_channels=64).to(self.device)
         self.opt2 = Adam(self.dec.parameters(),
                         lr=self.lr,
                         weight_decay=self.wd)
@@ -136,6 +152,7 @@ class Trainer():
         print ('ContiClassifier: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.classifier_baseline.parameters() if p.requires_grad), sum(p.numel() for p in self.classifier_baseline.parameters())))
         print ('DisClassifier: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.modelclass.parameters() if p.requires_grad), sum(p.numel() for p in self.modelclass.parameters())))
         print ('CodeBook: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.classifier_quantized.parameters() if p.requires_grad), sum(p.numel() for p in self.classifier_quantized.parameters())))
+        print ('Reasoning: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.reasoning.parameters() if p.requires_grad), sum(p.numel() for p in self.reasoning.parameters())))
  
 
         self.training_widgets = [progressbar.FormatLabel(''),
@@ -153,7 +170,6 @@ class Trainer():
         h = hd.view(hd.size(0), -1)
         dis_target = self.classifier_quantized(h)
         return dis_target
-
 
 
 
@@ -188,10 +204,17 @@ class Trainer():
                 
 
             # code book sampling
-            quant_loss, classifier_features, decoder_features, ce , td, hrc, r = self.modelclass(f)
-            
-            if not self.trim:
-                decoder_features = classifier_features
+            quant_loss, features, feature_idxs, ce , td, hrc, r = self.modelclass(f)
+
+            print (data.shape) 
+            print (f.shape)
+            [print(f.shape) for f in features]
+            [print(f.shape, torch.sum(f)) for f in feature_idxs]
+            if isinstance(features, list):
+                classifier_features = features[-1]
+                decoder_features = features[0]
+            else:
+                decoder_features = classifier_features = features
 
 
 
@@ -226,13 +249,10 @@ class Trainer():
             recon_loss_.backward()
             self.opt2.step()
 
-
-            # for p in self.dec.parameters(): p.requires_grad = True
-            # for p  in self.modelclass.parameters(): p.requires_grad = False
-            # for p in self.classifier_quantized.parameters(): p.requires_grad = False
-            # recon_loss between continious and discrete features
-            # for p  in self.modelclass.parameters(): p.requires_grad = True
-
+            # Reasoning pass
+            reasoning_loss = 0
+            if epoch > 10:
+                reasoning_loss = self.reasoning(feature_idxs.detach(), conti_target)
 
             with torch.no_grad():
                  self.modelclass.quantize.r.clamp_(0.9, 1.1)
@@ -242,6 +262,7 @@ class Trainer():
                                 f" train classloss:%.4f" % class_loss_ +
                                 f" train reconloss:%.4f" % recon_loss_ +
                                 f" train qloss:%.4f" % quant_loss +
+                                f" train rloss:%.4f" % reasoning_loss +
                                 f" radius:%.4f" % r +
                                 f" hypersphereloss train:%.4f" % hrc +
                                 # f" train disentanglement_loss:%.4f" % disentanglement_loss +
@@ -276,10 +297,14 @@ class Trainer():
 
 
             # code book sampling
-            quant_loss, classifier_features, decoder_features, ce , td, hrc, r = self.modelclass(features)
+            quant_loss, features, feature_idxs, ce , td, hrc, r = self.modelclass(f)
             
-            if not self.trim:
-                decoder_features = classifier_features
+            if isinstance(features, list):
+                classifier_features = features[-1]
+                decoder_features = features[0]
+            else:
+                decoder_features = classifier_features = features
+
 
             dis_target = m(self.cq(classifier_features))
             recon = self.dec(decoder_features)
@@ -312,6 +337,12 @@ class Trainer():
             mean_loss.append(loss.cpu().numpy())
             mean_recon_loss_.append(recon_loss_.cpu().numpy())
 
+              # Reasoning pass
+            reasoning_loss = 0
+            if epoch > 10:
+                reasoning_loss = self.reasoning(feature_idxs.detach(), conti_target)
+
+
             # acc metrics
             acc = accuracy_score(torch.argmax(dis_target, 1).cpu().numpy(),
                                             conti_target.cpu().numpy())
@@ -325,6 +356,7 @@ class Trainer():
             self.validation_widgets[0] = progressbar.FormatLabel(
                                 f" val epoch:%.1f" % epoch +
                                 f" val reconloss:%.4f" % recon_loss_ +
+                                f" val reasoningloss:%.4f" % reasoning_loss +
                                 f" hypersphereloss val:%.4f" % hrc + 
                                 # f" val disentanglement_loss:%.4f" % disentanglement_loss +
                                 f" val classloss:%.4f" % class_loss_ +
@@ -412,7 +444,7 @@ class Trainer():
 
 def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNISTv0/TI/data',
                       logs_root='../logs',
-                      name='default2',
+                      name='default3',
                       image_size=(32,32),
                       style_depth=16,
                       batch_size=50,
