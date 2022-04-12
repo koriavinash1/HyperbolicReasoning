@@ -70,12 +70,17 @@ class Trainer():
         self.latentdim = [self.latent_size]+map(image_size, ch_mult)
         self.emb_dim = int(np.prod(map(image_size, ch_mult)))
 
+
+        self.cooldown = 10
         self.nepochs = nepochs
         self.batch_size = batch_size
         self.data_root = data_root
         self.logs_root = logs_root
         self.input_size = image_size
         self.num_workers = num_workers
+
+        self.given_channels = 64
+        self.required_channels = 64
 
 
         self.trim = True
@@ -104,8 +109,8 @@ class Trainer():
                                     self.codebook_length//2,  
                                     self.codebook_length//4,
                                     self.nclasses]
-        self.modelclass = HierarchyVQmodulator(features = 64,  
-                                                z_channels = 64, 
+        self.modelclass = HierarchyVQmodulator(features = self.given_channels,  
+                                                z_channels = self.required_channels, 
                                                 emb_dim = self.emb_dim,
                                                 codebooksize = codebook_size, 
                                                 device = self.device).to(self.device)
@@ -140,11 +145,12 @@ class Trainer():
                             out_ch=out_ch, 
                             resamp_with_conv=resamp_with_conv, 
                             in_channels=in_channels,
-                            z_channels=64).to(self.device)
+                            z_channels=self.required_channels).to(self.device)
         self.opt2 = Adam(self.dec.parameters(),
                         lr=self.lr,
                         weight_decay=self.wd)
         self.LR_sch2 = ReduceLROnPlateau(self.opt2)
+
 
 
         # number of parameters
@@ -251,7 +257,7 @@ class Trainer():
 
             # Reasoning pass
             reasoning_loss = 0
-            if epoch >= 0:
+            if epoch >= self.cooldown:
                 reasoning_loss = self.reasoning.train_step(feature_idxs, conti_target)
 
             with torch.no_grad():
@@ -339,7 +345,7 @@ class Trainer():
 
               # Reasoning pass
             reasoning_loss = 0
-            if epoch >= 0:
+            if epoch >= self.cooldown:
                 reasoning_loss = self.reasoning.val_step(feature_idxs, conti_target)
 
 
