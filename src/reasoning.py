@@ -201,9 +201,9 @@ class BinaryConv2d(nn.Conv2d):
 class Reasoning(nn.Module):
     def __init__(self, 
             layers= [],
-            ar = 0.01,
-            lr = 0.001,
-            threshold = 0.5):
+            ar = 1e-4,
+            lr = 1e-3,
+            threshold = 1e-5):
         super(Reasoning, self).__init__()
 
         self.ar = ar
