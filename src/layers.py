@@ -474,11 +474,8 @@ class HierarchyVQmodulator(nn.Module):
 
         self.trim = trim
         self.quantize = VectorQuantizer2DHS(device, codebooksize[0], emb_dim, beta=1.0, sigma=0.1)
-
         self.quantize1 = VectorQuantizer2DHS(device, codebooksize[1], emb_dim, beta=1.0, sigma=0.1)
-
         self.quantize2 = VectorQuantizer2DHS(device, codebooksize[2], emb_dim, beta=1.0, sigma=0.1)
-
         self.quantize3 = VectorQuantizer2DHS(device, codebooksize[3], emb_dim, beta=1.0, sigma=0.1)
         
         
@@ -756,7 +753,7 @@ class VectorQuantizer2DHS(nn.Module):
 
 
         sampled_idx = torch.zeros(z.shape[0]*self.n_e)
-        sampled_idx[min_encoding_indices] = 1
+        sampled_idx[min_encoding_indices.detach()] = 1
         sampled_idx = sampled_idx.view(z.shape[0], self.n_e)
         return (z_q, loss + disentanglement_loss,
                     sampled_idx, 

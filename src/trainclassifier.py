@@ -71,7 +71,7 @@ class Trainer():
         self.emb_dim = int(np.prod(map(image_size, ch_mult)))
 
 
-        self.cooldown = 10
+        self.cooldown = 0
         self.nepochs = nepochs
         self.batch_size = batch_size
         self.data_root = data_root
@@ -80,7 +80,7 @@ class Trainer():
         self.num_workers = num_workers
 
         self.given_channels = 64
-        self.required_channels = 64
+        self.required_channels = latent_dim
 
 
         self.trim = True
@@ -118,8 +118,7 @@ class Trainer():
         # Quantized classifier
         self.inchannel = self.emb_dim  if self.trim else np.prod(self.latentdim)      
         clfq = []
-        clfq.append(nn.Linear(self.inchannel, hiddendim))
-        clfq.append(nn.Linear(hiddendim, self.nclasses ))
+        clfq.append(nn.Linear(self.inchannel, self.nclasses ))
         
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
 
@@ -264,18 +263,18 @@ class Trainer():
                  self.modelclass.quantize.r.clamp_(0.9, 1.1)
 
             self.training_widgets[0] = progressbar.FormatLabel(
-                                f" train epoch:%.1f" % epoch +
-                                f" train classloss:%.4f" % class_loss_ +
-                                f" train reconloss:%.4f" % recon_loss_ +
-                                f" train qloss:%.4f" % quant_loss +
-                                f" train rloss:%.4f" % reasoning_loss +
+                                f" tepoch:%.1f" % epoch +
+                                f" tcloss:%.4f" % class_loss_ +
+                                f" trcnloss:%.4f" % recon_loss_ +
+                                f" tqloss:%.4f" % quant_loss +
+                                f" trloss:%.4f" % reasoning_loss +
                                 f" radius:%.4f" % r +
-                                f" hypersphereloss train:%.4f" % hrc +
+                                f" thsploss:%.4f" % hrc +
                                 # f" train disentanglement_loss:%.4f" % disentanglement_loss +
                                 # f" train disentanglement_classloss:%.4f" % disentanglement_classloss +
-                                f" total train cb avg distance:%.4f" % td +
-                                f" total train cb avg variance:%.4f" % ce +
-                                f" total train loss:%.4f" % loss
+                                f" t<cb distance>:%.4f" % td +
+                                f" t<cb variance>:%.4f" % ce +
+                                f" ttloss:%.4f" % loss
                             )
             self.training_pbar.update(batch_idx)
         pass
@@ -303,7 +302,7 @@ class Trainer():
 
 
             # code book sampling
-            quant_loss, features, feature_idxs, ce , td, hrc, r = self.modelclass(f)
+            quant_loss, features, feature_idxs, ce , td, hrc, r = self.modelclass(features)
             
             if isinstance(features, list):
                 classifier_features = features[-1]
@@ -360,17 +359,17 @@ class Trainer():
             mean_acc_score.append(acc)
 
             self.validation_widgets[0] = progressbar.FormatLabel(
-                                f" val epoch:%.1f" % epoch +
-                                f" val reconloss:%.4f" % recon_loss_ +
-                                f" val reasoningloss:%.4f" % reasoning_loss +
-                                f" hypersphereloss val:%.4f" % hrc + 
+                                f" vepoch:%.1f" % epoch +
+                                f" vrcnloss:%.4f" % recon_loss_ +
+                                f" vrloss:%.4f" % reasoning_loss +
+                                f" vhsploss:%.4f" % hrc + 
+                                f" vcloss:%.4f" % class_loss_ +
                                 # f" val disentanglement_loss:%.4f" % disentanglement_loss +
-                                f" val classloss:%.4f" % class_loss_ +
-                                f" total val td avg distance:%.4f" % td +
-                                f" total val cb avg variance:%.4f" % ce +
-                                f" total val loss:%.4f" % loss +
-                                f" F1:%.4f" % f1_ +
-                                f" Accuracy:%.4f" % acc
+                                f" v<tcd distance>:%.4f" % td +
+                                f" v<tcb variance>:%.4f" % ce +
+                                f" tv loss:%.4f" % loss +
+                                f" vF1:%.4f" % f1_ +
+                                f" vAcc:%.4f" % acc
                             )
             self.validation_pbar.update(batch_idx)
 
@@ -450,7 +449,7 @@ class Trainer():
 
 def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNISTv0/TI/data',
                       logs_root='../logs',
-                      name='default3',
+                      name='default4',
                       image_size=(32,32),
                       style_depth=16,
                       batch_size=50,
@@ -467,7 +466,7 @@ def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNI
                       pl_weightage=1.0,
                       seed=42,
                       nclasses=10,
-                      latent_dim=8,
+                      latent_dim=16,
                       log=True,
                       ch=32,
                       out_ch=3,
