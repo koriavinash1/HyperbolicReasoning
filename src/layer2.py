@@ -673,7 +673,7 @@ class VectorQuantizer2DHS(nn.Module):
         # reshape z -> (batch, height, width, channel) and flatten
         #z = rearrange(z, 'b c h w -> b c h w ').contiguous()
         #z_flattened = z.view(-1, 16)
-        z = rearrange(z, 'b c h w -> b h w c').contiguous()
+        z = rearrange(z, 'b c h w -> b c h w').contiguous()
         z_flattened = z.view(-1, self.e_dim)
         z_flattened = torch.nn.functional.normalize(z_flattened)
         z = z_flattened.view(z.shape)
@@ -706,7 +706,7 @@ class VectorQuantizer2DHS(nn.Module):
         
         min_encoding_indices = torch.argmin(d, dim=1)
         #distances = d[range(d.shape[0]), min_encoding_indices].view(z.shape[0], z.shape[1])
-        distances = d[range(d.shape[0]), min_encoding_indices].view(z.shape[0], z.shape[1], z.shape[2])
+        distances = d[range(d.shape[0]), min_encoding_indices].view(z.shape[0], z.shape[2], z.shape[3])
         distances = self.rbf(distances)
 
         # get quantized vector and normalize
@@ -744,7 +744,7 @@ class VectorQuantizer2DHS(nn.Module):
         #z_q = rearrange(z_q, 'b c h w-> b c h w').contiguous()
         #z_flattened1 = z_q.view(z.shape[0],self.e_dim, z_q.shape[2]*z_q.shape[3])
 
-        z_q = rearrange(z_q, 'b h w c -> b c h w').contiguous()
+        z_q = rearrange(z_q, 'b c h w -> b c h w').contiguous()
         z_flattened1 = z_q.view(z.shape[0], z_q.shape[2]*z_q.shape[3], self.e_dim)
 
         sampled_idx = torch.zeros(z.shape[0]*self.n_e)
