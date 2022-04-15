@@ -3,13 +3,17 @@ import math
 from torch import nn
 import numpy as np
 import torch.nn.functional as F
+import einops
 from einops import rearrange
 import geomstats.backend as gs
 from geomstats.geometry.hypersphere import \
 Hypersphere
+from manifolds import PoincareBall
 from geomstats.geometry.hypersphere import HypersphereMetric
 from geomstats.geometry.riemannian_metric import RiemannianMetric
 from mathutils import artanh, tanh
+import torch.nn.init as init
+from torch.nn.modules.module import Module
 def nonlinearity(x):
     # swish
     return x*torch.sigmoid(x)
@@ -599,12 +603,11 @@ class VectorQuantizer2DHS(nn.Module):
         self.sigma = sigma
         self.device = device
         #sphere = Hypersphere(dim=16-1)
-        #self.embedding = nn.Embedding(self.n_e, 16)
-        #sphere = Hypersphere(self.e_dim-1)
+        sphere = Hypersphere(self.e_dim-1)
         self.embedding = nn.Embedding(self.n_e, self.e_dim)
-        #points_in_manifold = torch.Tensor(sphere.random_uniform(n_samples=self.n_e))
-        #self.embedding.weight.data.copy_(points_in_manifold).requires_grad=True
-        self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
+        points_in_manifold = torch.Tensor(sphere.random_uniform(n_samples=self.n_e))
+        self.embedding.weight.data.copy_(points_in_manifold).requires_grad=True
+        #self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
         self.hsreg = lambda x: [ torch.norm(x[i]) for i in range(x.shape[0])]
         self.r = torch.nn.Parameter(torch.ones(self.n_e)).to(device)
         self.ed = lambda x: [torch.norm(x[i]) for i in range(x.shape[0])]
@@ -672,6 +675,8 @@ class VectorQuantizer2DHS(nn.Module):
         #z_flattened = z.view(-1, 16)
         z = rearrange(z, 'b c h w -> b h w c').contiguous()
         z_flattened = z.view(-1, self.e_dim)
+        z_flattened = torch.nn.functional.normalize(z_flattened)
+        z = z_flattened.view(z.shape)
         # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
         #d =  torch.einsum('bd,dn->bn', z_flattened, rearrange(self.embedding.weight, 'n d -> d n'))
         
@@ -739,10 +744,12 @@ class VectorQuantizer2DHS(nn.Module):
         #z_q = rearrange(z_q, 'b c h w-> b c h w').contiguous()
         #z_flattened1 = z_q.view(z.shape[0],self.e_dim, z_q.shape[2]*z_q.shape[3])
 
-        z_q = rearrange(z_q, 'b h w c-> b c h w').contiguous()
+        z_q = rearrange(z_q, 'b h w c -> b c h w').contiguous()
         z_flattened1 = z_q.view(z.shape[0], z_q.shape[2]*z_q.shape[3], self.e_dim)
 
-
+        sampled_idx = torch.zeros(z.shape[0]*self.n_e)
+        sampled_idx[min_encoding_indices.detach()] = 1
+        sampled_idx = sampled_idx.view(z.shape[0], self.n_e)
         if self.remap is not None:
             min_encoding_indices = min_encoding_indices.reshape(z.shape[0],-1) # add batch axis
             min_encoding_indices = self.remap_to_used(min_encoding_indices)
@@ -752,7 +759,7 @@ class VectorQuantizer2DHS(nn.Module):
             min_encoding_indices = min_encoding_indices.reshape(
                 z_q.shape[0], z_q.shape[2], z_q.shape[3])
 
-        return z_q, loss, distances, (perplexity, min_encodings, min_encoding_indices), z_flattened1,codebookvariance, total_min_distance,  hsw, self.r
+        return z_q, loss, distances, (perplexity, min_encodings, min_encoding_indices), z_flattened1,codebookvariance, total_min_distance,  hsw, self.r, sampled_idx
 
     def get_codebook_entry(self, indices, shape):
         # shape specifying (batch, height, width, channel)
@@ -772,7 +779,7 @@ class VectorQuantizer2DHS(nn.Module):
         return z_q
 
 
-class HierarchyVQmodulator(nn.Module):
+class HierarchyTFVQmodulator(nn.Module):
 
     def __init__(self, *, 
                     features, 
@@ -781,9 +788,12 @@ class HierarchyVQmodulator(nn.Module):
                     codebooksize, 
                     device,
                     nclasses=10,
-                    trim=True):
-        super(HierarchyVQmodulator, self).__init__()
-        self.norm1 = nn.BatchNorm2d(features, affine=True)
+                    num_heads = 4
+                    ):
+        super(HierarchyTFVQmodulator, self).__init__()
+        #self.norm1 = nn.BatchNorm2d(features, affine=True)
+        self.nclasses = nclasses
+        self.norm1 = Normalize(features)
 
         self.conv1 = torch.nn.Conv2d(features,
                                        z_channels,
@@ -791,28 +801,29 @@ class HierarchyVQmodulator(nn.Module):
                                        stride=1,
                                        )
 
-        self.norm2 = nn.BatchNorm2d(z_channels, affine=True)
+        #self.norm2 = nn.BatchNorm2d(z_channels, affine=True)
+        self.norm2 = Normalize(z_channels)
         self.conv2 = torch.nn.Conv2d(z_channels,
                                       z_channels,
                                       kernel_size=1,
                                       stride=1,
                                       )
 
-        self.trim = trim
+        #self.trim = trim
         
-        self.quantize = VectorQuantizer2DHS(device, codebooksize, z_channels, beta=1.0, sigma=0.1)
-        self.q1w = torch.nn.Parameter(torch.ones(z_channels))
-
-        self.quantize1 = VectorQuantizer2DHS(device, codebooksize//2, z_channels, beta=1.0, sigma=0.1)
-        self.q2w = torch.nn.Parameter(torch.ones(z_channels))
-
-        self.quantize2 = VectorQuantizer2DHS(device, codebooksize//4, z_channels, beta=1.0, sigma=0.1)
-        self.q3w = torch.nn.Parameter(torch.ones(z_channels))
-
+        self.quantize = VectorQuantizer2DHS(device, codebooksize[0], z_channels, beta=1.0, sigma=0.1)
+       # self.q1w = torch.nn.Parameter(torch.ones(z_channels))
+        self.t1 = TransformerBlock(z_channels, z_channels*2, num_heads, dropout)     
+        self.quantize1 = VectorQuantizer2DHS(device, codebooksize[1], z_channels, beta=1.0, sigma=0.1)
+        #self.q2w = torch.nn.Parameter(torch.ones(z_channels))
+        self.t2 = TransformerBlock(z_channels, z_channels*2, num_heads, dropout)
+        self.quantize2 = VectorQuantizer2DHS(device, codebooksize[2], z_channels, beta=1.0, sigma=0.1)
+       # self.q3w = torch.nn.Parameter(torch.ones(z_channels))
+        self.t3 = TransformerBlock(z_channels, z_channels*2, num_heads, dropout)
         self.quantize3 = VectorQuantizer2DHS(device, nclasses, z_channels, beta=1.0, sigma=0.1)
-        self.q4w = torch.nn.Parameter(torch.ones(z_channels))
-        
-
+        #self.q4w = torch.nn.Parameter(torch.ones(z_channels))
+        self.clf = torch.nn.Linear(z_channels, nclasses)
+        """
         self.q1conv = None
         self.q2conv = None
         self.q3conv = None
@@ -853,7 +864,7 @@ class HierarchyVQmodulator(nn.Module):
         if not (conv is None):
             x = conv(x)
         return x
-
+    """
     def forward(self, x):
         x1 = self.norm1(x)
         #x1 = nonlinearity(x1)
@@ -861,18 +872,25 @@ class HierarchyVQmodulator(nn.Module):
         x2 = self.norm2(x1)
         x2 = self.conv2(x1)
 
-        z_q1, loss1, distances, info, zqf1, ce1, td1, hrc1, r1 = self.quantize(x2)
-        z_q1 = self.attention(x2, self.q1w, z_q1, self.q1conv) 
+        z_q1, loss1, distances, info, zqf1, ce1, td1, hrc1, r1, i1 = self.quantize(x2)
+        #z_q1 = self.attention(x2, self.q1w, z_q1, self.q1conv) 
+        zqf1 = self.t1(zqf1)
+        z_q1t = zqf1.view(z_q1.shape)
+        z_q2, loss2, distances, info, zqf2, ce2, td2, hrc2, r2, i2 = self.quantize1(z_q1t)
+        #z_q2 = self.attention(z_q1, self.q2w, z_q2, self.q2conv) 
+        zqf2 = self.t2(zqf2)
+        z_q2t = zqf2.view(z_q2.shape)
 
-        z_q2, loss2, distances, info, zqf2, ce2, td2, hrc2, r2 = self.quantize1(z_q1)
-        z_q2 = self.attention(z_q1, self.q2w, z_q2, self.q2conv) 
-        
-        z_q3, loss3, distances, info, zqf3, ce3, td3, hrc3, r3 = self.quantize2(z_q2)
-        z_q3 = self.attention(z_q2, self.q3w, z_q3, self.q3conv) 
-        
-        z_q4, loss4, distances, info, zqf4, ce4, td4, hrc4, r4 = self.quantize3(z_q3)
-        z_q4 = self.attention(z_q3, self.q4w, z_q4, self.q4conv)
+        z_q3, loss3, distances, info, zqf3, ce3, td3, hrc3, r3, i3 = self.quantize2(z_q2t)
+        #z_q3 = self.attention(z_q2, self.q3w, z_q3, self.q3conv) 
+        zqf3 = self.t3(zqf3)
+        z_q3t = zqf3.view(z_q3.shape)
 
+        z_q4, loss4, distances, info, zqf4, ce4, td4, hrc4, r4, i4 = self.quantize3(z_q3t)
+        #z_q4 = self.attention(z_q3, self.q4w, z_q4, self.q4conv)
+        z_q4t = self.clf(zqf4)
+        #z_q4t = z_q4t.view(zqf3.shape[0],self.nclasses. zqf3.shape[2], zqf3.shape[3] )
+        z_q4t = torch.mean(z_q4t, dim=1)
         loss = 0.25*(loss1 + loss2 + loss3 + loss4)
         # zqf = 0.25*(zqf1 + zqf2 + zqf3 + zqf4) 
         ce = 0.25*(ce1 + ce2 + ce3 + ce4) 
@@ -880,7 +898,7 @@ class HierarchyVQmodulator(nn.Module):
         hrc = 0.25*(hrc1 + hrc2 + hrc3 + hrc4) 
         r = torch.mean(r1)#0.25*(r1 + r2 + r3 + r4)
 
-        return loss, z_q4, z_q1, ce, td, hrc, r
+        return loss, z_q4, z_q1, ce, td, hrc, r, z_q4t, [i1, i2, i3, i4]
 
 class VectorQuantizer2DHB(nn.Module):
     """
@@ -986,10 +1004,10 @@ class VectorQuantizer2DHB(nn.Module):
         assert return_logits==False, "Only for interface compatible with Gumbel"
         # reshape z -> (batch, height, width, channel) and flatten
         z = rearrange(z, 'b c h w -> b h w c').contiguous()
-        #if self.leaf == True:
-        z_flattened = self.expmap0(z.view(-1, self.e_dim), 1)
-        #else:
-        #z_flattened = z.view(-1, self.e_dim)
+        if self.leaf == True:
+           z_flattened = self.expmap0(z.view(-1, self.e_dim), 1)
+        else:
+           z_flattened = z.view(-1, self.e_dim)
         # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
         d = self.dist(z_flattened, self.embedding.weight)
 
@@ -1007,8 +1025,8 @@ class VectorQuantizer2DHB(nn.Module):
         z_qf = self.embedding(min_encoding_indices)
         z_q = z_qf.view(z.shape)
         #if self.leaf == True:
-        z_qf = self.logmap0(z_qf, 1, 2)
-        z_ql = z_qf.view(z.shape)
+        z_qfl = self.logmap0(z_qf, 1)
+        z_ql = z_qfl.view(z.shape)
         #else:
 
          #  z_ql = None
@@ -1032,17 +1050,17 @@ class VectorQuantizer2DHB(nn.Module):
         else:
             loss = torch.mean(self.dist(z_qf, z_flattened.detach()))
             z_qf = z_flattened.detach() + z_qf - z_flattened.detach()
+        
         """
-
         if not self.legacy:
                 loss = self.beta * torch.mean(self.dist(z_qf.detach(), z_flattened)) + \
-                     torch.mean(self.dist(z_qf, z_flattened.detach())) - mean_min_distance
+                     torch.mean(self.dist(z_qf, z_flattened.detach())) #- mean_min_distance
         else:
                 loss = torch.mean(self.dist(z_qf.detach(), z_flattened)) + \
-                     self.beta * torch.mean(self.dist(z_qf, z_flattened.detach())) - mean_min_distance
+                     self.beta * torch.mean(self.dist(z_qf, z_flattened.detach())) #- mean_min_distance
         z_qf = z_flattened + (z_qf - z_flattened).detach()
-        """
         
+        """
         if self.leaf == True:
             if not self.legacy:
                 loss = self.beta * torch.mean((z_q.detach() - z) ** 2) + \
@@ -1077,7 +1095,7 @@ class VectorQuantizer2DHB(nn.Module):
             min_encoding_indices = min_encoding_indices.reshape(
                 z_q.shape[0], z_q.shape[2], z_q.shape[3])
 
-        return z_q, loss, distances, (perplexity, min_encodings, min_encoding_indices), mean_min_distance, z_ql, minenc
+        return z_q, loss, distances, (perplexity, min_encodings, min_encoding_indices), mean_min_distance, z_ql, minenc, z_qf
 
     def get_codebook_entry(self, indices, shape):
         # shape specifying (batch, height, width, channel)
@@ -1095,7 +1113,77 @@ class VectorQuantizer2DHB(nn.Module):
             z_q = z_q.permute(0, 3, 1, 2).contiguous()
 
         return z_q
+class MLPBlock(nn.Module):
 
+    def __init__(self, hidden_size: int, mlp_dim: int, dropout_rate: float = 0.0) -> None:
+
+        super().__init__()
+
+        if not (0 <= dropout_rate <= 1):
+            raise ValueError("dropout_rate should be between 0 and 1.")
+
+        self.linear1 = nn.Linear(hidden_size, mlp_dim)
+        self.linear2 = nn.Linear(mlp_dim, hidden_size)
+        self.fn = nn.GELU()
+        self.drop1 = nn.Dropout(dropout_rate)
+        self.drop2 = nn.Dropout(dropout_rate)
+
+
+    def forward(self, x):
+        x = self.fn(self.linear1(x))
+        x = self.drop1(x)
+        x = self.linear2(x)
+        x = self.drop2(x)
+        return x
+
+class SABlock(nn.Module):
+
+    def __init__(self, hidden_size: int, num_heads: int, dropout_rate: float = 0.0) -> None:
+        super().__init__()
+
+        if not (0 <= dropout_rate <= 1):
+            raise ValueError("dropout_rate should be between 0 and 1.")
+
+        if hidden_size % num_heads != 0:
+            raise ValueError("hidden size should be divisible by num_heads.")
+
+        self.num_heads = num_heads
+        self.out_proj = nn.Linear(hidden_size, hidden_size)
+        self.qkv = nn.Linear(hidden_size, hidden_size * 3, bias=False)
+        self.drop_output = nn.Dropout(dropout_rate)
+        self.drop_weights = nn.Dropout(dropout_rate)
+        self.head_dim = hidden_size // num_heads
+        self.scale = self.head_dim**-0.5
+
+
+    def forward(self, x):
+        q, k, v = einops.rearrange(self.qkv(x), "b h (qkv l d) -> qkv b l h d", qkv=3, l=self.num_heads)
+        att_mat = (torch.einsum("blxd,blyd->blxy", q, k) * self.scale).softmax(dim=-1)
+        att_mat = self.drop_weights(att_mat)
+        x = torch.einsum("bhxy,bhyd->bhxd", att_mat, v)
+        x = einops.rearrange(x, "b h l d -> b l (h d)")
+        x = self.out_proj(x)
+        x = self.drop_output(x)
+        return x
+class TransformerBlock(nn.Module):
+
+    def __init__(self, hidden_size: int, mlp_dim: int, num_heads: int, dropout_rate: float = 0.0) -> None:
+        super().__init__()
+        if not (0 <= dropout_rate <= 1):
+                raise ValueError("dropout_rate should be between 0 and 1.")
+
+        if hidden_size % num_heads != 0:
+                raise ValueError("hidden_size should be divisible by num_heads.")
+
+        self.mlp = MLPBlock(hidden_size, mlp_dim, dropout_rate)
+        self.norm1 = nn.LayerNorm(hidden_size)
+        self.attn = SABlock(hidden_size, num_heads, dropout_rate)
+        self.norm2 = nn.LayerNorm(hidden_size)
+
+    def forward(self, x):
+        x = x + self.attn(self.norm1(x))
+        x = x + self.mlp(self.norm2(x))
+        return x
 class modulator(nn.Module):
 
     def __init__(self, *,
@@ -1125,6 +1213,84 @@ class modulator(nn.Module):
         x2 = self.conv2(x2)
 
         return x2
+
+
+
+class HypLinear(nn.Module):
+    """
+    Hyperbolic linear layer.
+    """
+
+    def __init__(self, in_features, out_features, c, dropout, use_bias):
+        super(HypLinear, self).__init__()
+        self.manifold = PoincareBall()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.c = c
+        self.dropout = dropout
+        self.use_bias = use_bias
+        self.bias = nn.Parameter(torch.Tensor(out_features))
+        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
+        self.reset_parameters()
+
+    def reset_parameters(self):
+        init.xavier_uniform_(self.weight, gain=math.sqrt(2))
+        init.constant_(self.bias, 0)
+
+    def forward(self, x):
+        drop_weight = F.dropout(self.weight, self.dropout, training=self.training)
+        mv = self.manifold.mobius_matvec(m = drop_weight,x=x, c =self.c)
+        res = self.manifold.proj(mv, self.c)
+        if self.use_bias:
+            bias = self.manifold.proj_tan0(self.bias.view(1, -1), c = self.c)
+            hyp_bias = self.manifold.expmap0(bias, c =self.c)
+            hyp_bias = self.manifold.proj(hyp_bias, c =self.c)
+            res = self.manifold.mobius_add(res, hyp_bias, c=self.c)
+            res = self.manifold.proj(res, c =self.c)
+        return res
+
+    def extra_repr(self):
+        return 'in_features={}, out_features={}, c={}'.format(
+            self.in_features, self.out_features, self.c
+        )
+class HypAct(nn.Module):
+    """
+    Hyperbolic activation layer.
+    """
+
+    def __init__(self,  c_in, c_out):
+        super(HypAct, self).__init__()
+        self.manifold = PoincareBall()
+        self.c_in = c_in
+        self.c_out = c_out
+        self.act = nn.ReLU()
+
+    def forward(self, x):
+        xt = self.act(self.manifold.logmap0(x, c=self.c_in))
+        xt = self.manifold.proj_tan0(xt, c=self.c_out)
+        return self.manifold.proj(self.manifold.expmap0(xt, c=self.c_out), c=self.c_out)
+
+    def extra_repr(self):
+        return 'c_in={}, c_out={}'.format(
+            self.c_in, self.c_out
+        )
+
+class HNNLayer(nn.Module):
+    """
+    Hyperbolic neural networks layer.
+    """
+
+    def __init__(self,  in_features, out_features, c, dropout, use_bias):
+        super(HNNLayer, self).__init__()
+        self.linear = HypLinear( in_features, out_features, c, dropout, use_bias)
+        self.hyp_act = HypAct( c, c)
+
+    def forward(self, x):
+        h = self.linear.forward(x)
+        h = self.hyp_act.forward(h)
+        return h
+
+
 class HierarchyVQhb(nn.Module):
 
     def __init__(self, *,
@@ -1132,7 +1298,7 @@ class HierarchyVQhb(nn.Module):
                  codebooksize,
                  device,
                  nclasses=10,
-                 trim=True):
+                 trim=False):
         super(HierarchyVQhb, self).__init__()
         self.device = device
 
@@ -1141,16 +1307,19 @@ class HierarchyVQhb(nn.Module):
 
         self.quantize = VectorQuantizer2DHB(device, codebooksize, z_channels, beta=1.0, sigma=0.1, node='child', leaf = True)
         self.q1w = torch.nn.Parameter(torch.ones(z_channels))
+        self.t1 = HNNLayer(z_channels, z_channels, 1, 0, True)
 
         self.quantize1 = VectorQuantizer2DHB(device, codebooksize // 2, z_channels, beta=1.0, sigma=0.1, node='child', leaf = False)
         self.q2w = torch.nn.Parameter(torch.ones(z_channels))
+        self.t2 = HNNLayer(z_channels, z_channels, 1, 0, True)
 
         self.quantize2 = VectorQuantizer2DHB(device, codebooksize // 4, z_channels, beta=1.0, sigma=0.1, node='child', leaf = False)
         self.q3w = torch.nn.Parameter(torch.ones(z_channels))
-
+        self.t3 = HNNLayer(z_channels, z_channels, 1, 0, True)
+        
         self.quantize3 = VectorQuantizer2DHB(device, nclasses, z_channels, beta=1.0, sigma=0.1, node='parent', leaf = False)
         self.q4w = torch.nn.Parameter(torch.ones(z_channels))
-        
+        self.t4 = HNNLayer(z_channels, z_channels, 1, 0, True)
         self.q1conv = None
         self.q2conv = None
         self.q3conv = None
@@ -1195,17 +1364,23 @@ class HierarchyVQhb(nn.Module):
     def forward(self, x):
    
 
-        z_q1, loss1, distances1, info, td1, z_ql1, minenc1 = self.quantize(x)
-        z_ql1 = self.attention(x, self.q1w, z_ql1, self.q1conv)
+        z_q1, loss1, distances1, info, td1, z_ql1, minenc1, z_qf1 = self.quantize(x)
+        #z_ql1 = self.attention(x, self.q1w, z_ql1, self.q1conv)
+        z_qf1 = self.t1(z_qf1)
+        z_q1 = z_qf1.view(z_q1.shape)
 
-        z_q2, loss2, distances2, info,  td2, z_ql2, minenc2 = self.quantize1(z_ql1)
-        z_ql2 = self.attention(z_ql1, self.q2w, z_ql2, self.q2conv)
+        z_q2, loss2, distances2, info,  td2, z_ql2, minenc2, z_qf2 = self.quantize1(z_q1)
+        #z_ql2 = self.attention(z_ql1, self.q2w, z_ql2, self.q2conv)
+        z_qf2 = self.t2(z_qf2)
+        z_q2 = z_qf2.view(z_q2.shape)
+        
+        z_q3, loss3, distances3, info,  td3, z_ql3, minenc3, z_qf3 = self.quantize2(z_q2)
+        #z_ql3 = self.attention(z_ql2, self.q3w, z_ql3, self.q3conv)
+        z_qf3 = self.t3(z_qf3)
+        z_qf3 = z_qf3.view(z_q3.shape)
 
-        z_q3, loss3, distances3, info,  td3, z_ql3, minenc3 = self.quantize2(z_ql2)
-        z_ql3 = self.attention(z_ql2, self.q3w, z_ql3, self.q3conv)
-
-        z_q4, loss4, distances4, info,  td4, z_ql4, minenc4 = self.quantize3(z_ql3)
-        z_ql4 = self.attention(z_ql3, self.q4w, z_ql4, self.q4conv)
+        z_q4, loss4, distances4, info,  td4, z_ql4, minenc4, z_qf4 = self.quantize3(z_q3)
+        #z_ql4 = self.attention(z_ql3, self.q4w, z_ql4, self.q4conv)
 
         loss = 0.25 * (loss1 + loss2 + loss3 + loss4)
         # zqf = 0.25*(zqf1 + zqf2 + zqf3 + zqf4)

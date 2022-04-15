@@ -4,7 +4,7 @@ from torch import nn
 import fire
 import json
 from layer2 import DiscAE, DiscClassifier, Decoder, VQmodulator, modulator, HierarchyVQhb
-from rsgd import RiemannianSGD
+#from rsgd import RiemannianSGD
 from clsmodel import mnist  # , afhq, stl10
 from torch.optim import Adam
 import numpy as np
@@ -191,7 +191,7 @@ class Trainer():
             #quant_loss, symbols, decoder_features, codebookdistance, distanceuncertainty = self.modelclass(mf)
             classblock = torch.ones_like(distanceuncertainty)
             classblock = classblock * conti_target.unsqueeze(1).unsqueeze(2)
-
+            print(torch.mean(symbols))
 
             dis_target1 = m(self.cq(decoder_features))
             cl = ce_loss(logits=dis_target1, target=conti_target)
@@ -412,7 +412,7 @@ def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNI
                       pl_weightage=1.0,
                       seed=42,
                       nclasses=10,
-                      latent_dim=8,
+                      latent_dim=16,
                       log=True,
                       ch=32,
                       out_ch=3,

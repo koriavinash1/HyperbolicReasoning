@@ -268,7 +268,7 @@ class Reasoning(nn.Module):
 
 
     def ce_loss(self, p, y):
-        return f.cross_entropy(p, y, label_smoothing=0.1)
+        return f.cross_entropy(p, y)
 
     def bce_loss(self, p, y):
         return f.binary_cross_entropy_with_logits(p, y)

@@ -5,7 +5,7 @@ import os
 from torch import nn
 import fire
 import json
-from layers import DiscAE, DiscClassifier, Decoder, VQmodulator, HierarchyVQmodulator
+from layer2 import DiscAE, DiscClassifier, Decoder, VQmodulator,HierarchyTFVQmodulator,  HierarchyVQmodulator
 from clsmodel import mnist #, afhq, stl10
 from torch.optim import Adam
 import numpy as np
@@ -71,7 +71,7 @@ class Trainer():
         self.emb_dim = int(np.prod(map(image_size, ch_mult)))
 
 
-        self.cooldown = 10
+        self.cooldown = 45
         self.nepochs = nepochs
         self.batch_size = batch_size
         self.data_root = data_root
@@ -83,7 +83,7 @@ class Trainer():
         self.required_channels = 64
 
 
-        self.trim = True
+        self.trim = False
         self.__init__dl()
         print(torch.cuda.is_available())
 
@@ -109,26 +109,27 @@ class Trainer():
                                     self.codebook_length//2,  
                                     self.codebook_length//4,
                                     self.nclasses]
-        self.modelclass = HierarchyVQmodulator(features = self.given_channels,  
+        self.modelclass = HierarchyTFVQmodulator(features = self.given_channels,  
                                                 z_channels = self.required_channels, 
-                                                emb_dim = self.emb_dim,
+                                                #emb_dim = self.emb_dim,
                                                 codebooksize = codebook_size, 
                                                 device = self.device).to(self.device)
         
         # Quantized classifier
+        """
         self.inchannel = self.emb_dim  if self.trim else np.prod(self.latentdim)      
         clfq = []
         clfq.append(nn.Linear(self.inchannel, hiddendim))
         clfq.append(nn.Linear(hiddendim, self.nclasses ))
         
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
-
+        """
         # Reasoning Module
         self.reasoning = Reasoning(layers=codebook_size).to(self.device)
 
 
         # Optimizers
-        self.opt = Adam(list(self.modelclass.parameters()) + list(self.classifier_quantized.parameters()),
+        self.opt = Adam(self.modelclass.parameters(),
                         lr=self.lr,
                         weight_decay=self.wd)
         self.LR_sch = ReduceLROnPlateau(self.opt)
@@ -157,7 +158,7 @@ class Trainer():
         print ('FeatureExtractor: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.feature_extractor.parameters() if p.requires_grad), sum(p.numel() for p in self.feature_extractor.parameters())))
         print ('ContiClassifier: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.classifier_baseline.parameters() if p.requires_grad), sum(p.numel() for p in self.classifier_baseline.parameters())))
         print ('DisClassifier: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.modelclass.parameters() if p.requires_grad), sum(p.numel() for p in self.modelclass.parameters())))
-        print ('CodeBook: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.classifier_quantized.parameters() if p.requires_grad), sum(p.numel() for p in self.classifier_quantized.parameters())))
+        #print ('CodeBook: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.classifier_quantized.parameters() if p.requires_grad), sum(p.numel() for p in self.classifier_quantized.parameters())))
         print ('Reasoning: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.reasoning.parameters() if p.requires_grad), sum(p.numel() for p in self.reasoning.parameters())))
  
 
@@ -210,26 +211,28 @@ class Trainer():
                 
 
             # code book sampling
-            quant_loss, features, feature_idxs, ce , td, hrc, r = self.modelclass(f)
+            quant_loss, features, decoder_features, ce , td, hrc, r, clf, feature_idxs = self.modelclass(f)
 
             # print (data.shape) 
             # print (f.shape)
             # [print(f.shape) for f in features]
             # [print(f.shape, torch.sum(f)) for f in feature_idxs]
+            """
             if isinstance(features, list):
                 classifier_features = features[-1]
                 decoder_features = features[0]
             else:
                 decoder_features = classifier_features = features
+            """
 
 
-
-            dis_target = m(self.cq(classifier_features))
+            #dis_target = m(self.cq(classifier_features))
+            dis_target = m(clf)
             class_loss_ = ce_loss(logits = dis_target, target = conti_target)
             # class_loss_ = recon_loss(logits = dis_target, target = conti_target)
+            
 
-
-            loss = class_loss_ +  quant_loss #quant_loss = quant_loss + cb_disentanglement_loss
+            loss = class_loss_ +  quant_loss - td + ce #quant_loss = quant_loss + cb_disentanglement_loss
             loss.backward()
             self.opt.step()
 
@@ -254,12 +257,12 @@ class Trainer():
             recon_loss_ = recon_loss(logits = recon, target = data)
             recon_loss_.backward()
             self.opt2.step()
-
+            
             # Reasoning pass
             reasoning_loss = 0
             if epoch >= self.cooldown:
                 reasoning_loss = self.reasoning.train_step(feature_idxs, conti_target)
-
+            
             with torch.no_grad():
                  self.modelclass.quantize.r.clamp_(0.9, 1.1)
 
@@ -303,16 +306,17 @@ class Trainer():
 
 
             # code book sampling
-            quant_loss, features, feature_idxs, ce , td, hrc, r = self.modelclass(f)
-            
+            quant_loss, features, decoder_features, ce , td, hrc, r, clf, feature_idxs = self.modelclass(features)
+            """
             if isinstance(features, list):
                 classifier_features = features[-1]
                 decoder_features = features[0]
             else:
                 decoder_features = classifier_features = features
+            """
+            dis_target = m(clf)
 
-
-            dis_target = m(self.cq(classifier_features))
+            #dis_target = m(self.cq(classifier_features))
             recon = self.dec(decoder_features)
 
             # save sample reconstructions
@@ -342,12 +346,13 @@ class Trainer():
             loss = class_loss_ + quant_loss + ce
             mean_loss.append(loss.cpu().numpy())
             mean_recon_loss_.append(recon_loss_.cpu().numpy())
-
+            
+            
               # Reasoning pass
             reasoning_loss = 0
             if epoch >= self.cooldown:
                 reasoning_loss = self.reasoning.val_step(feature_idxs, conti_target)
-
+            
 
             # acc metrics
             acc = accuracy_score(torch.argmax(dis_target, 1).cpu().numpy(),
@@ -419,7 +424,7 @@ class Trainer():
     def save_classmodel(self, iepoch, stats):
         model = {
                 'modelclass': self.modelclass.state_dict(),
-                'discreteclassifier':self.classifier_quantized.state_dict(),
+               # 'discreteclassifier':self.classifier_quantized.state_dict(),
                 'decmodel': self.dec.state_dict(),
                 'epoch': iepoch,
                 'stats': stats
@@ -467,7 +472,7 @@ def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNI
                       pl_weightage=1.0,
                       seed=42,
                       nclasses=10,
-                      latent_dim=8,
+                      latent_dim=16,
                       log=True,
                       ch=32,
                       out_ch=3,
