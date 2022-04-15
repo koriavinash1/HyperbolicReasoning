@@ -261,7 +261,10 @@ class Reasoning(nn.Module):
 
 
         loss = ce_loss + be_loss
+        all_linear1_params = torch.cat([x.view(-1) for x in self.parameters()])
+        l1_regularization = torch.norm(all_linear1_params, 1)
 
+        loss += 0.001*l1_regularization
         loss.backward()
         self.opt.step() 
         return loss.detach()
@@ -279,9 +282,8 @@ class Reasoning(nn.Module):
         ce_loss = 0
         
         x = [xi.to(y.device) for xi in x]
-
         input_ = x[0]
-        for i, block in enumerate(self.layers[::-1]):
+        for i, block in enumerate(self.layers[:-1]):
             input_ = block(input_)
             be_loss += self.bce_loss(input_, x[i +1])
 
