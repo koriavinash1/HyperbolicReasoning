@@ -444,6 +444,15 @@ class VQmodulator(nn.Module):
 
         return loss, z_q, zqf, ce, td, hrc, r
 
+class weightConstraint(object):
+    def __init__(self):
+        pass
+    
+    def __call__(self,module):
+        if hasattr(module,'weight'):
+            w=module.weight.data
+            w=w.clamp(0,1.0)
+            module.weight.data=w
 
 
 class HierarchyVQmodulator(nn.Module):
@@ -534,12 +543,16 @@ class HierarchyVQmodulator(nn.Module):
             self.rattn3 = torch.nn.Linear(codebooksize[2],
                                         codebooksize[3],
                                         )
+            wc = weightConstraint()
+            self.rattn1.apply(wc)
+            self.rattn2.apply(wc)
+            self.rattn3.apply(wc)
 
         self.z_channels = z_channels
         self.emb_dim = emb_dim 
 
     def attention(self, input_,  w, x, conv=None):
-        x = input_ + (w * x.view(-1, self.emb_dim)).view(x.shape)
+        # x = input_ + (w * x.view(-1, self.emb_dim)).view(x.shape)
 
         if not (conv is None):
             x = conv(x)
