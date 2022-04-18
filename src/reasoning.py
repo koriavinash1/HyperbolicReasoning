@@ -61,6 +61,7 @@ class MomentumWithThresholdBinaryOptimizer(Optimizer):
         threshold: float = 0,
         adam_lr=0.001,
     ):
+
         if not 0 < ar < 1:
             raise ValueError(
                 "given adaptivity rate {} is invalid; should be in (0, 1) (excluding endpoints)".format(
@@ -96,6 +97,7 @@ class MomentumWithThresholdBinaryOptimizer(Optimizer):
                 y = ar
 
             for param_idx, p in enumerate(params):
+                print (p, p.grad)
                 grad = p.grad.data
                 state = self.state[p]
 

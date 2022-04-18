@@ -5,7 +5,7 @@ import os
 from torch import nn
 import fire
 import json
-from layers import DiscAE, DiscClassifier, Decoder, VQmodulator, HierarchyVQmodulator
+from layers import DiscAE, DiscClassifier, Decoder, VQmodulator,  HierarchyVQmodulator
 from clsmodel import mnist #, afhq, stl10
 from torch.optim import Adam
 import numpy as np
@@ -57,7 +57,7 @@ class Trainer():
                     hiddendim = 64,
                     log = False,
                     trim=True,
-                    combine=False,
+                    combine=True,
                     reasoning=True):
 
         self.codebook_length = codebook_length
@@ -74,7 +74,6 @@ class Trainer():
         self.emb_dim = int(np.prod(map(image_size, ch_mult)))
 
 
-        self.cooldown = 0
         self.nepochs = nepochs
         self.batch_size = batch_size
         self.data_root = data_root
@@ -88,7 +87,6 @@ class Trainer():
         self.combine = combine 
         self.reasoning = reasoning
 
-        self.trim = True
         self.__init__dl()
         print(torch.cuda.is_available())
 
@@ -231,7 +229,6 @@ class Trainer():
                 decoder_features = classifier_features = features
 
 
-
             dis_target = m(self.cq(classifier_features))
             class_loss_ = ce_loss(logits = dis_target, target = conti_target)
 
@@ -288,13 +285,14 @@ class Trainer():
 
             # code book sampling
             quant_loss, all_features, features, feature_idxs, ce , td, hrc, r = self.modelclass(features)
-            
+
             if isinstance(features, list):
                 classifier_features = features[-1]
                 decoder_features = features[0]
             else:
                 decoder_features = classifier_features = features
 
+                
 
             dis_target = m(self.cq(classifier_features))
             recon = self.dec(decoder_features)
@@ -321,7 +319,6 @@ class Trainer():
             loss = class_loss_ + quant_loss 
             mean_loss.append(loss.cpu().numpy())
             mean_recon_loss_.append(recon_loss_.cpu().numpy())
-
 
             # acc metrics
             acc = accuracy_score(torch.argmax(dis_target, 1).cpu().numpy(),
@@ -391,7 +388,7 @@ class Trainer():
     def save_classmodel(self, iepoch, stats):
         model = {
                 'modelclass': self.modelclass.state_dict(),
-                'discreteclassifier':self.classifier_quantized.state_dict(),
+               # 'discreteclassifier':self.classifier_quantized.state_dict(),
                 'decmodel': self.dec.state_dict(),
                 'epoch': iepoch,
                 'stats': stats

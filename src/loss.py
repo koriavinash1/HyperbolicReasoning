@@ -20,9 +20,9 @@ def recon_loss(logits, target):
                0.01 * F.l1_loss(logits, target)
 
 
-def ce_loss(logits, target, label_smoothing=0.0):
+def ce_loss(logits, target):
 
-    return F.cross_entropy(logits, target, label_smoothing=label_smoothing)
+    return F.cross_entropy(logits, target)
 
 def gradient_penalty(images, output, weight = 10):
     batch_size = images.shape[0]
