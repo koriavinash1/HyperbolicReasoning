@@ -493,10 +493,29 @@ class HierarchyVQmodulator(nn.Module):
         self.reasoning = reasoning
         self.combine = combine
 
-        self.quantize = VectorQuantizer2DHS(device, codebooksize[0], emb_dim, beta=1.0, sigma=0.1)
-        self.quantize1 = VectorQuantizer2DHS(device, codebooksize[1], emb_dim, beta=1.0, sigma=0.1)
-        self.quantize2 = VectorQuantizer2DHS(device, codebooksize[2], emb_dim, beta=1.0, sigma=0.1)
-        self.quantize3 = VectorQuantizer2DHS(device, codebooksize[3], emb_dim, beta=1.0, sigma=0.1)
+        self.quantize = VectorQuantizer2DHS(device, 
+                                codebooksize[0], 
+                                emb_dim, 
+                                beta=1.0, 
+                                sigma=0.1)
+        self.quantize1 = VectorQuantizer2DHS(device, 
+                                codebooksize[1], 
+                                emb_dim, 
+                                beta=1.0, 
+                                sigma=0.1, 
+                                ignorezq = True)
+        self.quantize2 = VectorQuantizer2DHS(device, 
+                                codebooksize[2], 
+                                emb_dim, 
+                                beta=1.0, 
+                                sigma=0.1,
+                                ignorezq=True)
+        self.quantize3 = VectorQuantizer2DHS(device, 
+                                codebooksize[3], 
+                                emb_dim, 
+                                beta=1.0, 
+                                sigma=0.1,
+                                ignorezq=True)
         
         
         self.q1w = torch.nn.Parameter(torch.ones(emb_dim))
@@ -660,6 +679,7 @@ class VectorQuantizer2DHS(nn.Module):
                     n_e = 128, 
                     e_dim = 16, 
                     beta = 0.9, 
+                    ignorezq = False,
                     remap=None, 
                     unknown_index="random",
                     sane_index_shape=False, 
@@ -679,6 +699,7 @@ class VectorQuantizer2DHS(nn.Module):
         self.legacy = legacy
         self.sigma = sigma
         self.device = device
+        self.ignorezq = ignorezq
 
 
         # uniformly sampled initialization
@@ -804,11 +825,11 @@ class VectorQuantizer2DHS(nn.Module):
         # compute loss for embedding
          
         if not self.legacy:
-            loss = self.beta * torch.mean((z_q.detach() - z) ** 2) + \
-                   torch.mean((z_q - z.detach()) ** 2) + hsw
+            loss = self.beta * torch.mean((z_q.detach() - z) ** 2) + hsw \
+                  + 0 if self.ignorezq else torch.mean((z_q - z.detach()) ** 2) 
         else:
-            loss = torch.mean((z_q.detach() - z) ** 2) + self.beta * \
-                   torch.mean((z_q - z.detach()) ** 2) + hsw 
+            loss = torch.mean((z_q.detach() - z) ** 2) + hsw \
+                + 0 if self.ignorezq else self.beta * torch.mean((z_q - z.detach()) ** 2) 
 
 
         disentanglement_loss = codebookvariance - total_min_distance
