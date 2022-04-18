@@ -455,8 +455,14 @@ class HierarchyVQmodulator(nn.Module):
                     device,
                     dropout=0.0, 
                     nclasses=10,
-                    trim=True):
+                    trim=True,
+                    combine=True,
+                    reasoning=True):
         super(HierarchyVQmodulator, self).__init__()
+
+        self.codebook_conditional = 0.8
+
+        # modulator layers
         self.norm1 = nn.BatchNorm2d(features, affine=True)
 
         self.conv1 = torch.nn.Conv2d(features,
@@ -471,8 +477,13 @@ class HierarchyVQmodulator(nn.Module):
                                       kernel_size=1,
                                       stride=1,
                                       )
+        # ============
 
         self.trim = trim
+        self.reasoning = reasoning
+        self.combine = combine
+
+
         self.quantize = VectorQuantizer2DHS(device, codebooksize[0], emb_dim, beta=1.0, sigma=0.1)
         self.quantize1 = VectorQuantizer2DHS(device, codebooksize[1], emb_dim, beta=1.0, sigma=0.1)
         self.quantize2 = VectorQuantizer2DHS(device, codebooksize[2], emb_dim, beta=1.0, sigma=0.1)
@@ -490,24 +501,38 @@ class HierarchyVQmodulator(nn.Module):
         if self.trim:
             self.q1conv = torch.nn.Conv2d(z_channels,
                                         z_channels//4,
-                                        kernel_size=3,
-                                        padding=1,
+                                        kernel_size=1,
                                         stride=1,
                                         )
             self.q2conv = torch.nn.Conv2d(z_channels//4,
                                         z_channels//8,
-                                        kernel_size=3,
-                                        padding=1,
+                                        kernel_size=1,
                                         stride=1,
                                         )
             self.q3conv = torch.nn.Conv2d(z_channels//8,
                                         1,
-                                        kernel_size=3,
-                                        padding=1,
+                                        kernel_size=1,
                                         stride=1,
                                         )
 
-        # self.BottleneckMLP = BottleneckMLP(input = input, hiddendim = hiddendim)
+            if self. combine:
+                f_channels = z_channels + z_channels//4 + z_channels//8 + 1
+                self.combine = torch.nn.Conv2d(f_channels,
+                                            z_channels,
+                                            kernel_size=1,
+                                            stride=1,
+                                            )
+
+        if self.reasoning:
+            self.rattn1 = torch.nn.Linear(codebooksize[0],
+                                        codebooksize[1],
+                                        )
+            self.rattn2 = torch.nn.Linear(codebooksize[1],
+                                        codebooksize[2],
+                                        )
+            self.rattn3 = torch.nn.Linear(codebooksize[2],
+                                        codebooksize[3],
+                                        )
 
         self.z_channels = z_channels
         self.emb_dim = emb_dim 
@@ -518,6 +543,22 @@ class HierarchyVQmodulator(nn.Module):
         if not (conv is None):
             x = conv(x)
         return x
+
+    def other_parameters(self):
+        for name, layer in self.named_parameters():
+            if not ("ratt" in name.lower()):
+                yield layer
+
+    def reasoning_parameters(self):
+        for name, layer in self.named_parameters():
+            if "ratt" in name.lower():
+                yield layer
+
+    def reasoning_attn(self, cb, w):
+        if self.reasoning_attn:
+            return torch.einsum('md,mn->nd', cb, w.T)
+        else:
+            return cb
 
     def forward(self, x):
         x1 = self.norm1(x)
@@ -531,23 +572,47 @@ class HierarchyVQmodulator(nn.Module):
 
         z_q1, loss1, sampled_idx1, ce1, td1, hrc1, r1 = self.quantize(x2)
         z_q1_attn = self.attention(x2, self.q1w, z_q1, self.q1conv)
+        self.quantize1.embedding.weight.data.copy_(self.codebook_conditional*self.quantize1.embedding.weight + \
+                    (1-self.codebook_conditional)*self.reasoning_attn(self.quantize.embedding.weight, self.rattn1.weight))                                        
+
 
         z_q2, loss2, sampled_idx2, ce2, td2, hrc2, r2 = self.quantize1(z_q1_attn)
         z_q2_attn = self.attention(z_q1_attn, self.q2w, z_q2, self.q2conv)
+        self.quantize2.embedding.weight.data.copy_(self.codebook_conditional*self.quantize2.embedding.weight + \
+                    (1 -self.codebook_conditional)*self.reasoning_attn(self.quantize1.embedding.weight, self.rattn2.weight))                                        
 
         z_q3, loss3, sampled_idx3, ce3, td3, hrc3, r3 = self.quantize2(z_q2_attn)
         z_q3_attn = self.attention(z_q2_attn, self.q3w, z_q3, self.q3conv)
+        self.quantize3.embedding.weight.data.copy_(self.codebook_conditional*self.quantize3.embedding.weight + \
+                    (1 - self.codebook_conditional)*self.reasoning_attn(self.quantize2.embedding.weight, self.rattn3.weight))                                        
+
 
         z_q4, loss4, sampled_idx4, ce4, td4, hrc4, r4 = self.quantize3(z_q3_attn)
 
+
+
+        # logs
         loss = 0.25*(loss1 + loss2 + loss3 + loss4)
         ce = 0.25*(ce1 + ce2 + ce3 + ce4) 
         td = 0.25*(td1 + td2 + td3 + td4) 
         hrc = 0.25*(hrc1 + hrc2 + hrc3 + hrc4) 
         r = 0.25*(r1 + r2 + r3 + r4)
 
+        # import pdb; pdb.set_trace()
+        # print(list(self.reasoning_parameters()))
+
+        # reasoning weights regularizations:
+        all_linear1_params = torch.cat([x.view(-1) for x in list(self.reasoning_parameters())])
+        l1_regularization = 1e-4*torch.norm(all_linear1_params, 1)
+        loss += l1_regularization
+
+        if self.combine:
+            z_combine = torch.cat([z_q1, z_q2, z_q3, z_q4], dim=1)
+            z_q = self.combine(z_combine)
+
         return (loss, 
-                    [z_q1, z_q2, z_q3, z_q4],  
+                    [z_q1, z_q2, z_q3, z_q4],
+                    z_q,  
                     [sampled_idx1, sampled_idx2, sampled_idx3, sampled_idx4],
                     ce, td, hrc, r)
 
@@ -752,11 +817,11 @@ class VectorQuantizer2DHS(nn.Module):
         #         z_q.shape[0], z_q.shape[2], z_q.shape[3])
 
 
-        sampled_idx = torch.zeros(z.shape[0]*self.n_e)
-        sampled_idx[min_encoding_indices.detach()] = 1
+        sampled_idx = torch.zeros(z.shape[0]*self.n_e).to(z.device)
+        sampled_idx[min_encoding_indices] = 1
         sampled_idx = sampled_idx.view(z.shape[0], self.n_e)
         return (z_q, loss + disentanglement_loss,
-                    sampled_idx, 
+                    (sampled_idx, min_encoding_indices), 
                     codebookvariance, 
                     total_min_distance,  
                     hsw, 
