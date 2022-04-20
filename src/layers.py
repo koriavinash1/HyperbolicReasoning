@@ -634,22 +634,22 @@ class HierarchyVQmodulator(nn.Module):
 
         z_q1, loss1, sampled_idx1, ce1, td1, hrc1, r1 = self.quantize(x2)
         z_q1_attn = self.attention(x2, self.q1w, z_q1, self.q1conv)
-        self.quantize1.embedding.weight.data.copy_(self.codebook_conditional*self.quantize1.embedding.weight + \
-                    (1-self.codebook_conditional)*self.reasoning_attn(self.quantize.embedding.weight, self.rattn1.weight))                                        
 
 
-        z_q2, loss2, sampled_idx2, ce2, td2, hrc2, r2 = self.quantize1(z_q1_attn)
+        z_q2, loss2, sampled_idx2, ce2, td2, hrc2, r2 = self.quantize1(z_q1_attn,
+                                                                    self.quantize.embedding.weight,
+                                                                    self.rattn1.weight.T)
         z_q2_attn = self.attention(z_q1_attn, self.q2w, z_q2, self.q2conv)
-        self.quantize2.embedding.weight.data.copy_(self.codebook_conditional*self.quantize2.embedding.weight + \
-                    (1 -self.codebook_conditional)*self.reasoning_attn(self.quantize1.embedding.weight, self.rattn2.weight))                                        
 
-        z_q3, loss3, sampled_idx3, ce3, td3, hrc3, r3 = self.quantize2(z_q2_attn)
+        z_q3, loss3, sampled_idx3, ce3, td3, hrc3, r3 = self.quantize2(z_q2_attn,
+                                                                    self.quantize1.embedding.weight,
+                                                                    self.rattn2.weight.T)
         z_q3_attn = self.attention(z_q2_attn, self.q3w, z_q3, self.q3conv)
-        self.quantize3.embedding.weight.data.copy_(self.codebook_conditional*self.quantize3.embedding.weight + \
-                    (1 - self.codebook_conditional)*self.reasoning_attn(self.quantize2.embedding.weight, self.rattn3.weight))                                        
 
 
-        z_q4, loss4, sampled_idx4, ce4, td4, hrc4, r4 = self.quantize3(z_q3_attn)
+        z_q4, loss4, sampled_idx4, ce4, td4, hrc4, r4 = self.quantize3(z_q3_attn,
+                                                                    self.quantize2.embedding.weight,
+                                                                    self.rattn3.weight.T)
 
 
         # logs
@@ -782,7 +782,12 @@ class GumbelQuantize2DHS(nn.Module):
         back=torch.gather(used[None,:][inds.shape[0]*[0],:], 1, inds)
         return back.reshape(ishape)
 
-    def forward(self, z, temp=None, rescale_logits=False, return_logits=False):
+    def forward(self, z,
+                    prev_cb = None,
+                    attention_w = None, 
+                    temp=None, 
+                    rescale_logits=False, 
+                    return_logits=False):
         # force hard = True when we are in eval mode, as we must quantize. 
         # actually, always true seems to work
 
@@ -792,13 +797,14 @@ class GumbelQuantize2DHS(nn.Module):
         
 
         z_flattened = z.view(-1, self.e_dim)
+        cb = self.embedding.weight
 
 
         # intra distance (gdes-distance) between codebook vector 
         d1 = torch.einsum('bd,dn->bn', 
-                            self.embedding.weight, 
-                            rearrange(self.embedding.weight, 'n d -> d n'))
-        ed1 = torch.tensor(self.ed(self.embedding.weight))
+                            cb, 
+                            rearrange(cb, 'n d -> d n'))
+        ed1 = torch.tensor(self.ed(cb))
         ed1 = ed1.repeat(self.n_e, 1)
         ed2 = ed1.transpose(0,1)
         ed3 = ed1 * ed2
@@ -813,7 +819,7 @@ class GumbelQuantize2DHS(nn.Module):
         codebookvariance = torch.mean(torch.var(d1, 1))
 
         # get quantized vector and normalize
-        hsw = torch.Tensor(self.hsreg(self.embedding.weight)).to(self.device)
+        hsw = torch.Tensor(self.hsreg(cb)).to(self.device)
         hsw = torch.mean(torch.square(self.r - hsw))
         self.r = self.clamp_class.apply(self.r)
         disentanglement_loss = codebookvariance - total_min_distance
@@ -823,6 +829,8 @@ class GumbelQuantize2DHS(nn.Module):
         temp = self.temperature if temp is None else temp
 
         logits = self.proj(z_flattened)
+
+
         if self.remap is not None:
             # continue only with used logits
             full_zeros = torch.zeros_like(logits)
@@ -834,7 +842,13 @@ class GumbelQuantize2DHS(nn.Module):
             full_zeros[:,self.used,...] = soft_one_hot
             soft_one_hot = full_zeros
 
-        z_q = torch.einsum('b n, n d -> b d', soft_one_hot, self.embedding.weight)
+        z_q = torch.einsum('b n, n d -> b d', soft_one_hot, cb)
+
+        if not (prev_cb is None):
+            cb_attn = torch.einsum('md,mn->nd', prev_cb, attention_w)
+            z_q += 0.2*torch.einsum('b n, n d -> b d', soft_one_hot, cb_attn)
+
+
         z_q = z_q.view(z.shape)
         # + kl divergence to the prior loss
         qy = F.softmax(logits, dim=1)
@@ -972,7 +986,10 @@ class VectorQuantizer2DHS(nn.Module):
         back=torch.gather(used[None,:][inds.shape[0]*[0],:], 1, inds)
         return back.reshape(ishape)
 
-    def forward(self, z, temp=None, rescale_logits=False, return_logits=False):
+    def forward(self, z, 
+                    prev_cb = None,
+                    attention_w = None,
+                    temp=None, rescale_logits=False, return_logits=False):
         
         assert temp is None or temp==1.0, "Only for interface compatible with Gumbel"
         assert rescale_logits==False, "Only for interface compatible with Gumbel"
@@ -1017,6 +1034,11 @@ class VectorQuantizer2DHS(nn.Module):
 
         # get quantized vector and normalize
         z_q = self.embedding(min_encoding_indices).view(z.shape)
+        if not (prev_cb is None):
+            cb_attn = torch.einsum('md,mn->nd', prev_cb, attention_w)
+            z_q += 0.2*cb_attn[min_encoding_indices].view(z.shape)
+
+
         hsw = torch.Tensor(self.hsreg(self.embedding.weight)).to(self.device)
         hsw = torch.mean(torch.square(self.r - hsw))
 
