@@ -235,6 +235,9 @@ class Trainer():
 
             loss = class_loss_ +  quant_loss  #quant_loss = quant_loss + cb_disentanglement_loss
             loss.backward()
+
+            # print (torch.mean(self.modelclass.rattn3.weight.grad), torch.std(self.modelclass.rattn3.weight.grad))
+            
             self.opt.step()
 
 
@@ -370,7 +373,9 @@ class Trainer():
 
             stats = {'loss': loss, 'f1': f1, 'acc': acc, 'rloss': rloss}
             print ('Epoch: {}. Stats: {}'.format(iepoch, stats))
-
+            print (torch.mean(self.modelclass.rattn1.weight), torch.std(self.modelclass.rattn1.weight))
+            print (torch.mean(self.modelclass.rattn2.weight), torch.std(self.modelclass.rattn2.weight))
+            print (torch.mean(self.modelclass.rattn3.weight), torch.std(self.modelclass.rattn3.weight))
 
             if loss < min_loss:
                 self.save_classmodel(iepoch, stats)

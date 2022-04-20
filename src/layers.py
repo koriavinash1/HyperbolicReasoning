@@ -444,6 +444,11 @@ class VQmodulator(nn.Module):
 
         return loss, z_q, zqf, ce, td, hrc, r
 
+def tempsigmoid(x, k=2.0):
+    nd = 1.0 
+    temp = nd/torch.log(torch.tensor(k)) 
+    return x
+
 class weightConstraint(object):
     def __init__(self):
         pass
@@ -465,12 +470,15 @@ class HierarchyVQmodulator(nn.Module):
                     device,
                     dropout=0.0, 
                     nclasses=10,
+                    ignorezq=False,
+                    gumble = True,
                     trim=True,
                     combine=True,
                     reasoning=True):
         super(HierarchyVQmodulator, self).__init__()
 
-        self.codebook_conditional = 0.8
+        self.ignorezq = ignorezq
+        self.codebook_conditional = 0.1 if self.ignorezq else 0.8 
 
         # modulator layers
         self.norm1 = nn.BatchNorm2d(features, affine=True)
@@ -493,36 +501,57 @@ class HierarchyVQmodulator(nn.Module):
         self.reasoning = reasoning
         self.combine = combine
 
-        self.quantize = VectorQuantizer2DHS(device, 
-                                codebooksize[0], 
-                                emb_dim, 
-                                beta=1.0, 
-                                sigma=0.1)
-        self.quantize1 = VectorQuantizer2DHS(device, 
-                                codebooksize[1], 
-                                emb_dim, 
-                                beta=1.0, 
-                                sigma=0.1, 
-                                ignorezq = True)
-        self.quantize2 = VectorQuantizer2DHS(device, 
-                                codebooksize[2], 
-                                emb_dim, 
-                                beta=1.0, 
-                                sigma=0.1,
-                                ignorezq=True)
-        self.quantize3 = VectorQuantizer2DHS(device, 
-                                codebooksize[3], 
-                                emb_dim, 
-                                beta=1.0, 
-                                sigma=0.1,
-                                ignorezq=True)
+        if not gumble:
+            self.quantize = VectorQuantizer2DHS(device, 
+                                    codebooksize[0], 
+                                    emb_dim, 
+                                    beta=1.0, 
+                                    sigma=0.1)
+            self.quantize1 = VectorQuantizer2DHS(device, 
+                                    codebooksize[1], 
+                                    emb_dim, 
+                                    beta=1.0, 
+                                    sigma=0.1, 
+                                    ignorezq = self.ignorezq)
+            self.quantize2 = VectorQuantizer2DHS(device, 
+                                    codebooksize[2], 
+                                    emb_dim, 
+                                    beta=1.0, 
+                                    sigma=0.1,
+                                    ignorezq=self.ignorezq)
+            self.quantize3 = VectorQuantizer2DHS(device, 
+                                    codebooksize[3], 
+                                    emb_dim, 
+                                    beta=1.0, 
+                                    sigma=0.1,
+                                    ignorezq=self.ignorezq)
+        else:
+            self.quantize = GumbelQuantize2DHS(device, 
+                                    codebooksize[0], 
+                                    emb_dim, 
+                                    beta=1.0, 
+                                    sigma=0.1)
+            self.quantize1 = GumbelQuantize2DHS(device, 
+                                    codebooksize[1], 
+                                    emb_dim, 
+                                    beta=1.0, 
+                                    sigma=0.1)
+            self.quantize2 = GumbelQuantize2DHS(device, 
+                                    codebooksize[2], 
+                                    emb_dim, 
+                                    beta=1.0, 
+                                    sigma=0.1)
+            self.quantize3 = GumbelQuantize2DHS(device, 
+                                    codebooksize[3], 
+                                    emb_dim, 
+                                    beta=1.0, 
+                                    sigma=0.1)
         
+        # self.q1w = torch.nn.Parameter(torch.ones(emb_dim))
+        # self.q2w = torch.nn.Parameter(torch.ones(emb_dim))
+        # self.q3w = torch.nn.Parameter(torch.ones(emb_dim))
         
-        self.q1w = torch.nn.Parameter(torch.ones(emb_dim))
-        self.q2w = torch.nn.Parameter(torch.ones(emb_dim))
-        self.q3w = torch.nn.Parameter(torch.ones(emb_dim))
-        
-
+        self.q1w = self.q2w = self.q3w = None
         self.q1conv = None
         self.q2conv = None
         self.q3conv = None
@@ -623,14 +652,8 @@ class HierarchyVQmodulator(nn.Module):
         z_q4, loss4, sampled_idx4, ce4, td4, hrc4, r4 = self.quantize3(z_q3_attn)
 
 
-        # dis-loss
-        dot = lambda x, y: torch.abs(torch.sum(x*y*1.0/torch.norm(x, 2)*1.0/torch.norm(y, 2))).unsqueeze(0)
-        dloss = torch.cat([dot(self.quantize3.embedding.weight[i], 
-                            self.quantize3.embedding.weight[i]) for i in range(self.quantize3.embedding.weight.shape[0] - 1)])
-
-        dloss = torch.mean(dloss)
         # logs
-        loss = 0.25*(loss1 + loss2 + loss3 + loss4) + dloss
+        loss = 0.25*(loss1 + loss2 + loss3 + loss4) 
         ce = 0.25*(ce1 + ce2 + ce3 + ce4) 
         td = 0.25*(td1 + td2 + td3 + td4) 
         hrc = 0.25*(hrc1 + hrc2 + hrc3 + hrc4) 
@@ -641,10 +664,10 @@ class HierarchyVQmodulator(nn.Module):
 
         # reasoning weights regularizations:
         # all_linear1_params = torch.cat([x.view(-1) for x in list(self.reasoning_parameters())])
-        # l1_regularization = 1e-7*torch.norm(all_linear1_params, 1)
+        # l1_regularization = 1e-4*torch.norm(all_linear1_params, 1)
         # loss += l1_regularization
 
-        if self.combine:
+        if self.trim and self.combine:
             z_combine = torch.cat([z_q1, z_q2, z_q3, z_q4], dim=1)
             z_q = self.combine_conv(z_combine)
         else:
@@ -664,6 +687,185 @@ class Clamp(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad_output):
         return grad_output.clone()
+
+class GumbelQuantize2DHS(nn.Module):
+    """
+    credit to @karpathy: https://github.com/karpathy/deep-vector-quantization/blob/main/model.py (thanks!)
+    Gumbel Softmax trick quantizer
+    Categorical Reparameterization with Gumbel-Softmax, Jang et al. 2016
+    https://arxiv.org/abs/1611.01144
+    """
+    def __init__(self, device,  
+                    n_e = 128, 
+                    e_dim = 16, 
+                    beta = 0.9, 
+                    ignorezq = False,
+                    remap=None, 
+                    unknown_index="random",
+                    sane_index_shape=False, 
+                    legacy=True, 
+                    sigma = 0.1,
+                    straight_through=True,
+                    kl_weight=5e-4, 
+                    temp_init=1.0):
+        super().__init__()
+
+
+        self.n_e = n_e
+        self.e_dim = e_dim
+        self.beta = beta
+        self.legacy = legacy
+        self.sigma = sigma
+        self.device = device
+        self.ignorezq = ignorezq
+
+        self.temperature = temp_init
+        self.kl_weight = kl_weight
+        self.straight_through = straight_through
+
+        self.proj = nn.Linear(self.e_dim, self.n_e, 1)
+        self.embedding = nn.Embedding(self.n_e, self.e_dim)
+        sphere = Hypersphere(dim=self.e_dim - 1)
+
+
+        points_in_manifold = torch.Tensor(sphere.random_uniform(n_samples=self.n_e))
+        self.embedding.weight.data.copy_(points_in_manifold).requires_grad=True
+
+        #self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
+
+
+        self.hsreg = lambda x: [ torch.norm(x[i]) for i in range(x.shape[0])]
+        self.r = torch.nn.Parameter(torch.ones(self.n_e)).to(device)
+        self.ed = lambda x: [torch.norm(x[i]) for i in range(x.shape[0])]
+        
+
+        # remap
+        self.remap = remap
+        if self.remap is not None:
+            self.register_buffer("used", torch.tensor(np.load(self.remap)))
+            self.re_embed = self.used.shape[0]
+            self.unknown_index = unknown_index # "random" or "extra" or integer
+            if self.unknown_index == "extra":
+                self.unknown_index = self.re_embed
+                self.re_embed = self.re_embed+1
+
+            print(f"Remapping {self.n_e} indices to {self.re_embed} indices. "
+                  f"Using {self.unknown_index} for unknown indices.")
+        else:
+            self.re_embed = n_e
+
+        self.sane_index_shape = sane_index_shape
+        self.clamp_class = Clamp()
+
+
+    def remap_to_used(self, inds):
+        ishape = inds.shape
+        assert len(ishape)>1
+        inds = inds.reshape(ishape[0],-1)
+        used = self.used.to(inds)
+        match = (inds[:,:,None]==used[None,None,...]).long()
+        new = match.argmax(-1)
+        unknown = match.sum(2)<1
+        if self.unknown_index == "random":
+            new[unknown]=torch.randint(0,self.re_embed,size=new[unknown].shape).to(device=new.device)
+        else:
+            new[unknown] = self.unknown_index
+        return new.reshape(ishape)
+
+    def unmap_to_all(self, inds):
+        ishape = inds.shape
+        assert len(ishape)>1
+        inds = inds.reshape(ishape[0],-1)
+        used = self.used.to(inds)
+        if self.re_embed > self.used.shape[0]: # extra token
+            inds[inds>=self.used.shape[0]] = 0 # simply set to zero
+        back=torch.gather(used[None,:][inds.shape[0]*[0],:], 1, inds)
+        return back.reshape(ishape)
+
+    def forward(self, z, temp=None, rescale_logits=False, return_logits=False):
+        # force hard = True when we are in eval mode, as we must quantize. 
+        # actually, always true seems to work
+
+        assert temp is None or temp==1.0, "Only for interface compatible with Gumbel"
+        assert rescale_logits==False, "Only for interface compatible with Gumbel"
+        assert return_logits==False, "Only for interface compatible with Gumbel"
+        
+
+        z_flattened = z.view(-1, self.e_dim)
+
+
+        # intra distance (gdes-distance) between codebook vector 
+        d1 = torch.einsum('bd,dn->bn', 
+                            self.embedding.weight, 
+                            rearrange(self.embedding.weight, 'n d -> d n'))
+        ed1 = torch.tensor(self.ed(self.embedding.weight))
+        ed1 = ed1.repeat(self.n_e, 1)
+        ed2 = ed1.transpose(0,1)
+        ed3 = ed1 * ed2
+        edx = d1/ed3.to(self.device)
+        edx = torch.clamp(edx, min=-0.99999, max=0.99999)
+        # d = torch.acos(d)
+        d1 = torch.acos(edx)
+        
+
+        min_distance = torch.kthvalue(d1, 2, 0)
+        total_min_distance = torch.mean(min_distance[0])
+        codebookvariance = torch.mean(torch.var(d1, 1))
+
+        # get quantized vector and normalize
+        hsw = torch.Tensor(self.hsreg(self.embedding.weight)).to(self.device)
+        hsw = torch.mean(torch.square(self.r - hsw))
+        self.r = self.clamp_class.apply(self.r)
+        disentanglement_loss = codebookvariance - total_min_distance
+
+
+        hard = self.straight_through if self.training else True
+        temp = self.temperature if temp is None else temp
+
+        logits = self.proj(z_flattened)
+        if self.remap is not None:
+            # continue only with used logits
+            full_zeros = torch.zeros_like(logits)
+            logits = logits[:,self.used,...]
+
+        soft_one_hot = F.gumbel_softmax(logits, tau=temp, dim=1, hard=hard)
+        if self.remap is not None:
+            # go back to all entries but unused set to zero
+            full_zeros[:,self.used,...] = soft_one_hot
+            soft_one_hot = full_zeros
+
+        z_q = torch.einsum('b n, n d -> b d', soft_one_hot, self.embedding.weight)
+        z_q = z_q.view(z.shape)
+        # + kl divergence to the prior loss
+        qy = F.softmax(logits, dim=1)
+        kl_loss = self.kl_weight * torch.sum(qy * torch.log(qy * self.n_e + 1e-10), dim=1).mean()
+
+        ind = soft_one_hot.argmax(dim=1)
+        if self.remap is not None:
+            ind = self.remap_to_used(ind)
+
+
+        loss = kl_loss + hsw + disentanglement_loss
+
+        sampled_idx = torch.zeros(z.shape[0]*self.n_e).to(z.device)
+        sampled_idx[ind] = 1
+        sampled_idx = sampled_idx.view(z.shape[0], self.n_e)
+        return (z_q, loss,
+                    (sampled_idx, ind), 
+                    codebookvariance, 
+                    total_min_distance,  
+                    hsw, 
+                    torch.mean(self.r))
+
+    def get_codebook_entry(self, indices, shape):
+        b, h, w, c = shape
+        assert b*h*w == indices.shape[0]
+        indices = rearrange(indices, '(b h w) -> b h w', b=b, h=h, w=w)
+        if self.remap is not None:
+            indices = self.unmap_to_all(indices)
+        one_hot = F.one_hot(indices, num_classes=self.n_e).permute(0, 3, 1, 2).float()
+        z_q = torch.einsum('b n h w, n d -> b d h w', one_hot, self.embedding.weight)
+        return z_q
 
 
 class VectorQuantizer2DHS(nn.Module):
@@ -825,11 +1027,13 @@ class VectorQuantizer2DHS(nn.Module):
         # compute loss for embedding
          
         if not self.legacy:
-            loss = self.beta * torch.mean((z_q.detach() - z) ** 2) + hsw \
-                  + 0 if self.ignorezq else torch.mean((z_q - z.detach()) ** 2) 
+            loss = self.beta * torch.mean((z_q.detach() - z) ** 2) + hsw
+            if not self.ignorezq:
+                loss += torch.mean((z_q - z.detach()) ** 2) 
         else:
-            loss = torch.mean((z_q.detach() - z) ** 2) + hsw \
-                + 0 if self.ignorezq else self.beta * torch.mean((z_q - z.detach()) ** 2) 
+            loss = torch.mean((z_q.detach() - z) ** 2) + hsw 
+            if not self.ignorezq:
+                loss += self.beta * torch.mean((z_q - z.detach()) ** 2)
 
 
         disentanglement_loss = codebookvariance - total_min_distance
