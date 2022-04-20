@@ -471,7 +471,7 @@ class HierarchyVQmodulator(nn.Module):
                     dropout=0.0, 
                     nclasses=10,
                     ignorezq=False,
-                    gumble = True,
+                    gumble = False,
                     trim=True,
                     combine=True,
                     reasoning=True):
@@ -820,7 +820,7 @@ class GumbelQuantize2DHS(nn.Module):
 
         # get quantized vector and normalize
         hsw = torch.Tensor(self.hsreg(cb)).to(self.device)
-        hsw = torch.mean(torch.square(self.r - hsw))
+        hsw = torch.mean(torch.square(self.r - hsw.clone().detach()))
         self.r = self.clamp_class.apply(self.r)
         disentanglement_loss = codebookvariance - total_min_distance
 
@@ -1034,9 +1034,14 @@ class VectorQuantizer2DHS(nn.Module):
 
         # get quantized vector and normalize
         z_q = self.embedding(min_encoding_indices).view(z.shape)
+        cb_loss = 0
         if not (prev_cb is None):
-            cb_attn = torch.einsum('md,mn->nd', prev_cb, attention_w)
-            z_q += 0.2*cb_attn[min_encoding_indices].view(z.shape)
+            cb_attn = torch.einsum('md,mn->nd', 
+                                    prev_cb.clone().detach(), 
+                                    attention_w)
+            z_q2 = cb_attn[min_encoding_indices].view(z.shape)
+            cb_loss = F.mse_loss(z_q, z_q2)
+
 
 
         hsw = torch.Tensor(self.hsreg(self.embedding.weight)).to(self.device)
@@ -1049,15 +1054,16 @@ class VectorQuantizer2DHS(nn.Module):
         # compute loss for embedding
          
         if not self.legacy:
-            loss = self.beta * torch.mean((z_q.detach() - z) ** 2) + hsw
+            loss = self.beta * torch.mean((z_q.detach() - z) ** 2) 
             if not self.ignorezq:
                 loss += torch.mean((z_q - z.detach()) ** 2) 
         else:
-            loss = torch.mean((z_q.detach() - z) ** 2) + hsw 
+            loss = torch.mean((z_q.detach() - z) ** 2)  
             if not self.ignorezq:
                 loss += self.beta * torch.mean((z_q - z.detach()) ** 2)
 
-
+        loss += hsw
+        loss += cb_loss
         disentanglement_loss = codebookvariance - total_min_distance
 
         """

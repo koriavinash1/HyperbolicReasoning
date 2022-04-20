@@ -56,7 +56,7 @@ class Trainer():
                     in_channels =3,
                     hiddendim = 64,
                     log = False,
-                    trim=True,
+                    trim=False,
                     combine=True,
                     reasoning=True):
 
