@@ -56,8 +56,8 @@ class Trainer():
                     in_channels =3,
                     hiddendim = 64,
                     log = False,
-                    trim=False,
-                    combine=True,
+                    trim=True,
+                    combine=False,
                     reasoning=True):
 
         self.codebook_length = codebook_length

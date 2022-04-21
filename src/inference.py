@@ -232,6 +232,7 @@ class ILPExplainer(object):
 
 class InductiveReasoningDT(object):
     def __init__(self,  
+                    data,
                     ncodebook_features,
                     nclasses,
                     feature_extractor = None,
@@ -242,10 +243,12 @@ class InductiveReasoningDT(object):
                     device = 0,
                     mask_threshold=0.2,
                     class_mapping=None):
-                    
+
         self.ncodebook_features = ncodebook_features
         self.nclasses = nclasses
-        
+        self.Xdata = data[0]
+        self.Ydata = data[1]
+
         if isinstance(ncodebook_features, list):
             assert self.ncodebook_features[-1] == self.nclasses, "reasoning block count mismatch"
 
@@ -283,8 +286,10 @@ class InductiveReasoningDT(object):
         features = self.feature_extractor(x)
         loss, sampled_features, _, sampled_symbols, *_ = self.codebook(features)
         y = self.qclassifier(sampled_features)
-        y = F.one_hot(torch.argmax(y, 1), num_classes=y.shape[1])
-        return sampled_symbols.cpu().numpy(), y.cpu().numpy(), sampled_features.cpu().numpy()
+        y = torch.argmax(y, 1)
+        return [ss.cpu().numpy() for ss in sampled_symbols], \
+                    y.cpu().numpy(), \
+                    [sf.cpu().numpy() for sf in sampled_features]
 
 
     def define_nx_graph(self):
@@ -325,7 +330,9 @@ class InductiveReasoningDT(object):
     
 
     def get_class_symbol(self, class_idx):
-        return 0
+        xbatch = self.Xdata[self.Ydata == class_idx][:10]
+        sampled_symbols, y, sampled_features = self.forward(xbatch)
+        return torch.argmax(torch.sum(sampled_symbols[-1], 1)[y == class_idx], 1)
 
 
     def query(self, class_idx, visual=None):
