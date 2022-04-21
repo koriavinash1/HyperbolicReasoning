@@ -470,7 +470,7 @@ class HierarchyVQmodulator(nn.Module):
                     device,
                     dropout=0.0, 
                     nclasses=10,
-                    ignorezq=True,
+                    ignorezq=False,
                     gumble = False,
                     trim=True,
                     combine=True,
@@ -506,45 +506,53 @@ class HierarchyVQmodulator(nn.Module):
                                     codebooksize[0], 
                                     emb_dim, 
                                     beta=1.0, 
+                                    disentangle=True,
                                     sigma=0.1)
             self.quantize1 = VectorQuantizer2DHS(device, 
                                     codebooksize[1], 
                                     emb_dim, 
                                     beta=1.0, 
                                     sigma=0.1, 
+                                    disentangle=False,
                                     ignorezq = self.ignorezq)
             self.quantize2 = VectorQuantizer2DHS(device, 
                                     codebooksize[2], 
                                     emb_dim, 
                                     beta=1.0, 
                                     sigma=0.1,
+                                    disentangle=False,
                                     ignorezq=self.ignorezq)
             self.quantize3 = VectorQuantizer2DHS(device, 
                                     codebooksize[3], 
                                     emb_dim, 
                                     beta=1.0, 
                                     sigma=0.1,
+                                    disentangle=False,
                                     ignorezq=self.ignorezq)
         else:
             self.quantize = GumbelQuantize2DHS(device, 
                                     codebooksize[0], 
                                     emb_dim, 
                                     beta=1.0, 
+                                    disentangle=True,
                                     sigma=0.1)
             self.quantize1 = GumbelQuantize2DHS(device, 
                                     codebooksize[1], 
                                     emb_dim, 
                                     beta=1.0, 
+                                    disentangle=False,
                                     sigma=0.1)
             self.quantize2 = GumbelQuantize2DHS(device, 
                                     codebooksize[2], 
                                     emb_dim, 
                                     beta=1.0, 
+                                    disentangle=False,
                                     sigma=0.1)
             self.quantize3 = GumbelQuantize2DHS(device, 
                                     codebooksize[3], 
                                     emb_dim, 
                                     beta=1.0, 
+                                    disentangle=False,
                                     sigma=0.1)
         
         # self.q1w = torch.nn.Parameter(torch.ones(emb_dim))
@@ -700,6 +708,7 @@ class GumbelQuantize2DHS(nn.Module):
                     e_dim = 16, 
                     beta = 0.9, 
                     ignorezq = False,
+                    disentangle = True,
                     remap=None, 
                     unknown_index="random",
                     sane_index_shape=False, 
@@ -718,6 +727,7 @@ class GumbelQuantize2DHS(nn.Module):
         self.sigma = sigma
         self.device = device
         self.ignorezq = ignorezq
+        self.disentangle = disentangle
 
         self.temperature = temp_init
         self.kl_weight = kl_weight
@@ -859,7 +869,10 @@ class GumbelQuantize2DHS(nn.Module):
             ind = self.remap_to_used(ind)
 
 
-        loss = kl_loss + hsw + disentanglement_loss
+        loss = kl_loss 
+
+        if self.disentangle:
+           loss += hsw + disentanglement_loss
 
         sampled_idx = torch.zeros(z.shape[0]*self.n_e).to(z.device)
         sampled_idx[ind] = 1
@@ -896,6 +909,7 @@ class VectorQuantizer2DHS(nn.Module):
                     e_dim = 16, 
                     beta = 0.9, 
                     ignorezq = False,
+                    disentangle = True,
                     remap=None, 
                     unknown_index="random",
                     sane_index_shape=False, 
@@ -916,7 +930,7 @@ class VectorQuantizer2DHS(nn.Module):
         self.sigma = sigma
         self.device = device
         self.ignorezq = ignorezq
-
+        self.disentangle = disentangle
 
         # uniformly sampled initialization
         sphere = Hypersphere(dim=self.e_dim - 1)
@@ -1055,18 +1069,19 @@ class VectorQuantizer2DHS(nn.Module):
          
         if not self.legacy:
             loss = self.beta * torch.mean((z_q.detach() - z) ** 2) 
-            loss += torch.mean((z_q - z.detach()) ** 2) 
-            # if not self.ignorezq:
+            if not self.ignorezq:
+                loss += torch.mean((z_q - z.detach()) ** 2) 
         else:
             loss = torch.mean((z_q.detach() - z) ** 2)  
-            loss += self.beta * torch.mean((z_q - z.detach()) ** 2)
-            # if not self.ignorezq:
+            if not self.ignorezq:
+                loss += self.beta * torch.mean((z_q - z.detach()) ** 2)
 
         loss += cb_loss
         disentanglement_loss = codebookvariance - total_min_distance
-        if not self.ignorezq:
+        if self.disentangle:
             loss += hsw
             loss += disentanglement_loss
+
         """
         if not self.legacy:
             loss = self.beta * torch.mean((z_q.detach() - z) ** 2) + hsw - total_min_distance
