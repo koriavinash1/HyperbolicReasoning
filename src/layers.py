@@ -470,7 +470,7 @@ class HierarchyVQmodulator(nn.Module):
                     device,
                     dropout=0.0, 
                     nclasses=10,
-                    ignorezq=False,
+                    ignorezq=True,
                     gumble = False,
                     trim=True,
                     combine=True,
@@ -1055,17 +1055,18 @@ class VectorQuantizer2DHS(nn.Module):
          
         if not self.legacy:
             loss = self.beta * torch.mean((z_q.detach() - z) ** 2) 
-            if not self.ignorezq:
-                loss += torch.mean((z_q - z.detach()) ** 2) 
+            loss += torch.mean((z_q - z.detach()) ** 2) 
+            # if not self.ignorezq:
         else:
             loss = torch.mean((z_q.detach() - z) ** 2)  
-            if not self.ignorezq:
-                loss += self.beta * torch.mean((z_q - z.detach()) ** 2)
+            loss += self.beta * torch.mean((z_q - z.detach()) ** 2)
+            # if not self.ignorezq:
 
-        loss += hsw
         loss += cb_loss
         disentanglement_loss = codebookvariance - total_min_distance
-
+        if not self.ignorezq:
+            loss += hsw
+            loss += disentanglement_loss
         """
         if not self.legacy:
             loss = self.beta * torch.mean((z_q.detach() - z) ** 2) + hsw - total_min_distance
@@ -1093,7 +1094,7 @@ class VectorQuantizer2DHS(nn.Module):
         sampled_idx = torch.zeros(z.shape[0]*self.n_e).to(z.device)
         sampled_idx[min_encoding_indices] = 1
         sampled_idx = sampled_idx.view(z.shape[0], self.n_e)
-        return (z_q, loss + disentanglement_loss,
+        return (z_q, loss,
                     (sampled_idx, min_encoding_indices), 
                     codebookvariance, 
                     total_min_distance,  

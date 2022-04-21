@@ -7,7 +7,7 @@ import fire
 import json
 from layers import DiscAE, DiscClassifier, Decoder, VQmodulator,  HierarchyVQmodulator
 from clsmodel import mnist #, afhq, stl10
-from torch.optim import Adam
+from torch.optim import Adam, SGD
 import numpy as np
 from dataset import get
 from torch.optim.lr_scheduler import ReduceLROnPlateau, StepLR
@@ -35,7 +35,7 @@ class Trainer():
                     batch_size = 10,
                     nepochs = 20,
                     sigma=0.1,
-                    learning_rate = 2e-4,
+                    learning_rate = 1e-3,
                     num_workers =  None,
                     save_every = 'best',
                     aug_prob = 0.,
@@ -131,8 +131,7 @@ class Trainer():
         # Optimizers
         self.opt = Adam(list(self.modelclass.parameters()) + \
                         list(self.classifier_quantized.parameters()),
-                        lr=self.lr,
-                        weight_decay=self.wd)
+                        lr=self.lr)
 
         # self.opt = MomentumWithThresholdBinaryOptimizer(
         #                 list(self.modelclass.reasoning_parameters()),
@@ -141,7 +140,7 @@ class Trainer():
         #                 threshold=0.5,
         #                 adam_lr=self.lr,
         #             )
-        self.LR_sch = ReduceLROnPlateau(self.opt)
+        self.LR_sch = ReduceLROnPlateau(self.opt, patience=2)
 
 
 
@@ -159,7 +158,7 @@ class Trainer():
         self.opt2 = Adam(self.dec.parameters(),
                         lr=self.lr,
                         weight_decay=self.wd)
-        self.LR_sch2 = ReduceLROnPlateau(self.opt2)
+        self.LR_sch2 = ReduceLROnPlateau(self.opt2, patience=2)
 
 
 
