@@ -444,10 +444,10 @@ class VQmodulator(nn.Module):
 
         return loss, z_q, zqf, ce, td, hrc, r
 
-def tempsigmoid(x, k=2.0):
+def tempsigmoid(x, k=3.0):
     nd = 1.0 
     temp = nd/torch.log(torch.tensor(k)) 
-    return x
+    return torch.sigmoid(x/temp)
 
 class weightConstraint(object):
     def __init__(self):
@@ -456,7 +456,7 @@ class weightConstraint(object):
     def __call__(self,module):
         if hasattr(module,'weight'):
             w=module.weight.data
-            w=w.clamp(0,1.0)
+            w=tempsigmoid(w)
             module.weight.data=w
 
 
