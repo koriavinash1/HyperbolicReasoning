@@ -1,7 +1,7 @@
 {
     "data_root": "/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNISTv0/TI/data",
-    "logs_root": "../logs/default2",
-    "name": "default2",
+    "logs_root": "../logs/default4",
+    "name": "default4",
     "image_size": [
         32,
         32

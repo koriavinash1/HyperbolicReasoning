@@ -5,9 +5,9 @@ import os
 from torch import nn
 import fire
 import json
-from layers import DiscAE, DiscClassifier, Decoder, VQmodulator, HierarchyVQmodulator
+from layers import DiscAE, DiscClassifier, Decoder, VQmodulator,  HierarchyVQmodulator
 from clsmodel import mnist #, afhq, stl10
-from torch.optim import Adam
+from torch.optim import Adam, SGD
 import numpy as np
 from dataset import get
 from torch.optim.lr_scheduler import ReduceLROnPlateau, StepLR
@@ -16,7 +16,7 @@ import math
 import torchvision
 
 from loss import hpenalty, calc_pl_lengths, recon_loss, ce_loss
-from reasoning import Reasoning
+from reasoning import Reasoning, ReasoningModel, MomentumWithThresholdBinaryOptimizer
 from sklearn.metrics import accuracy_score, f1_score
 import progressbar
 
@@ -35,7 +35,7 @@ class Trainer():
                     batch_size = 10,
                     nepochs = 20,
                     sigma=0.1,
-                    learning_rate = 2e-4,
+                    learning_rate = 1e-3,
                     num_workers =  None,
                     save_every = 'best',
                     aug_prob = 0.,
@@ -55,7 +55,10 @@ class Trainer():
                     resamp_with_conv=True,
                     in_channels =3,
                     hiddendim = 64,
-                    log = False):
+                    log = False,
+                    trim=True,
+                    combine=False,
+                    reasoning=True):
 
         self.codebook_length = codebook_length
         self.sampling_size = sampling_size
@@ -71,7 +74,6 @@ class Trainer():
         self.emb_dim = int(np.prod(map(image_size, ch_mult)))
 
 
-        self.cooldown = 10
         self.nepochs = nepochs
         self.batch_size = batch_size
         self.data_root = data_root
@@ -80,10 +82,11 @@ class Trainer():
         self.num_workers = num_workers
 
         self.given_channels = 64
-        self.required_channels = 64
+        self.required_channels = latent_dim
+        self.trim = trim 
+        self.combine = combine 
+        self.reasoning = reasoning
 
-
-        self.trim = True
         self.__init__dl()
         print(torch.cuda.is_available())
 
@@ -113,25 +116,31 @@ class Trainer():
                                                 z_channels = self.required_channels, 
                                                 emb_dim = self.emb_dim,
                                                 codebooksize = codebook_size, 
-                                                device = self.device).to(self.device)
+                                                device = self.device,
+                                                trim = self.trim,
+                                                combine=self.combine,
+                                                reasoning=self.reasoning).to(self.device)
         
         # Quantized classifier
-        self.inchannel = self.emb_dim  if self.trim else np.prod(self.latentdim)      
+        self.inchannel = self.emb_dim  if (self.trim and not self.combine) else np.prod(self.latentdim)      
         clfq = []
-        clfq.append(nn.Linear(self.inchannel, hiddendim))
-        clfq.append(nn.Linear(hiddendim, self.nclasses ))
-        
+        clfq.append(nn.Linear(self.inchannel, self.nclasses ))
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
-
-        # Reasoning Module
-        self.reasoning = Reasoning(layers=codebook_size).to(self.device)
 
 
         # Optimizers
-        self.opt = Adam(list(self.modelclass.parameters()) + list(self.classifier_quantized.parameters()),
-                        lr=self.lr,
-                        weight_decay=self.wd)
-        self.LR_sch = ReduceLROnPlateau(self.opt)
+        self.opt = Adam(list(self.modelclass.parameters()) + \
+                        list(self.classifier_quantized.parameters()),
+                        lr=self.lr)
+
+        # self.opt = MomentumWithThresholdBinaryOptimizer(
+        #                 list(self.modelclass.reasoning_parameters()),
+        #                 list(self.classifier_quantized.parameters()) + list(self.modelclass.other_parameters()),
+        #                 ar=0.001,
+        #                 threshold=0.5,
+        #                 adam_lr=self.lr,
+        #             )
+        self.LR_sch = ReduceLROnPlateau(self.opt, patience=2)
 
 
 
@@ -149,16 +158,15 @@ class Trainer():
         self.opt2 = Adam(self.dec.parameters(),
                         lr=self.lr,
                         weight_decay=self.wd)
-        self.LR_sch2 = ReduceLROnPlateau(self.opt2)
+        self.LR_sch2 = ReduceLROnPlateau(self.opt2, patience=2)
 
 
 
         # number of parameters
         print ('FeatureExtractor: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.feature_extractor.parameters() if p.requires_grad), sum(p.numel() for p in self.feature_extractor.parameters())))
         print ('ContiClassifier: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.classifier_baseline.parameters() if p.requires_grad), sum(p.numel() for p in self.classifier_baseline.parameters())))
-        print ('DisClassifier: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.modelclass.parameters() if p.requires_grad), sum(p.numel() for p in self.modelclass.parameters())))
-        print ('CodeBook: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.classifier_quantized.parameters() if p.requires_grad), sum(p.numel() for p in self.classifier_quantized.parameters())))
-        print ('Reasoning: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.reasoning.parameters() if p.requires_grad), sum(p.numel() for p in self.reasoning.parameters())))
+        print ('codebook: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.modelclass.parameters() if p.requires_grad), sum(p.numel() for p in self.modelclass.parameters())))
+        print ('DisClassifier: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.classifier_quantized.parameters() if p.requires_grad), sum(p.numel() for p in self.classifier_quantized.parameters())))
  
 
         self.training_widgets = [progressbar.FormatLabel(''),
@@ -210,12 +218,9 @@ class Trainer():
                 
 
             # code book sampling
-            quant_loss, features, feature_idxs, ce , td, hrc, r = self.modelclass(f)
+            quant_loss, all_features, features, feature_idxs, ce , td, hrc, r = self.modelclass(f)
 
-            # print (data.shape) 
-            # print (f.shape)
-            # [print(f.shape) for f in features]
-            # [print(f.shape, torch.sum(f)) for f in feature_idxs]
+
             if isinstance(features, list):
                 classifier_features = features[-1]
                 decoder_features = features[0]
@@ -223,31 +228,16 @@ class Trainer():
                 decoder_features = classifier_features = features
 
 
-
             dis_target = m(self.cq(classifier_features))
             class_loss_ = ce_loss(logits = dis_target, target = conti_target)
-            # class_loss_ = recon_loss(logits = dis_target, target = conti_target)
 
 
-            loss = class_loss_ +  quant_loss #quant_loss = quant_loss + cb_disentanglement_loss
+            loss = class_loss_ +  quant_loss  #quant_loss = quant_loss + cb_disentanglement_loss
             loss.backward()
+
+            # print (torch.mean(self.modelclass.rattn3.weight.grad), torch.std(self.modelclass.rattn3.weight.grad))
+            
             self.opt.step()
-
-
-            # disentanglement loss
-            # disentanglement_loss = torch.mean(calc_pl_lengths(hidden_dim, recon)) + \
-            #                      hpenalty(self.dec, zqf, G_z=recon)
-            # disentanglement_classloss = hpenalty(self.cq, hidden_dim, G_z=dis_target) 
-            # loss = class_loss_ + 0.2 * disentanglement_loss + disentanglement_classloss + quant_loss +ce
-            # loss = class_loss_ +  quant_loss +ce
-            # total loss
-            # if loss > 0:
-            #    loss = loss
-            # else:
-            #    loss = torch.exp(class_loss_ + 0.2 * disentanglement_loss + quant_loss +ce)
-
-            #for p in self.dec.parameters(): p.requires_grad = False
-            #loss.backward(retain_graph = True)
 
 
             recon = self.dec(decoder_features.detach())
@@ -255,27 +245,20 @@ class Trainer():
             recon_loss_.backward()
             self.opt2.step()
 
-            # Reasoning pass
-            reasoning_loss = 0
-            if epoch >= self.cooldown:
-                reasoning_loss = self.reasoning.train_step(feature_idxs, conti_target)
 
             with torch.no_grad():
                  self.modelclass.quantize.r.clamp_(0.9, 1.1)
 
             self.training_widgets[0] = progressbar.FormatLabel(
-                                f" train epoch:%.1f" % epoch +
-                                f" train classloss:%.4f" % class_loss_ +
-                                f" train reconloss:%.4f" % recon_loss_ +
-                                f" train qloss:%.4f" % quant_loss +
-                                f" train rloss:%.4f" % reasoning_loss +
+                                f" tepoch:%.1f" % epoch +
+                                f" tcloss:%.4f" % class_loss_ +
+                                f" trcnloss:%.4f" % recon_loss_ +
+                                f" tqloss:%.4f" % quant_loss +
                                 f" radius:%.4f" % r +
-                                f" hypersphereloss train:%.4f" % hrc +
-                                # f" train disentanglement_loss:%.4f" % disentanglement_loss +
-                                # f" train disentanglement_classloss:%.4f" % disentanglement_classloss +
-                                f" total train cb avg distance:%.4f" % td +
-                                f" total train cb avg variance:%.4f" % ce +
-                                f" total train loss:%.4f" % loss
+                                f" thsploss:%.4f" % hrc +
+                                f" t<cb distance>:%.4f" % td +
+                                f" t<cb variance>:%.4f" % ce +
+                                f" ttloss:%.4f" % loss
                             )
             self.training_pbar.update(batch_idx)
         pass
@@ -303,14 +286,15 @@ class Trainer():
 
 
             # code book sampling
-            quant_loss, features, feature_idxs, ce , td, hrc, r = self.modelclass(f)
-            
+            quant_loss, all_features, features, feature_idxs, ce , td, hrc, r = self.modelclass(features)
+
             if isinstance(features, list):
                 classifier_features = features[-1]
                 decoder_features = features[0]
             else:
                 decoder_features = classifier_features = features
 
+                
 
             dis_target = m(self.cq(classifier_features))
             recon = self.dec(decoder_features)
@@ -333,21 +317,10 @@ class Trainer():
             class_loss_ = ce_loss(logits = dis_target, target = conti_target)
 
 
-            # disentanglement loss
-            # disentanglement_loss =         hpenalty(self.dec, zqf, G_z=recon)
-
-
-
             # total loss
-            loss = class_loss_ + quant_loss + ce
+            loss = class_loss_ + quant_loss 
             mean_loss.append(loss.cpu().numpy())
             mean_recon_loss_.append(recon_loss_.cpu().numpy())
-
-              # Reasoning pass
-            reasoning_loss = 0
-            if epoch >= self.cooldown:
-                reasoning_loss = self.reasoning.val_step(feature_idxs, conti_target)
-
 
             # acc metrics
             acc = accuracy_score(torch.argmax(dis_target, 1).cpu().numpy(),
@@ -360,17 +333,15 @@ class Trainer():
             mean_acc_score.append(acc)
 
             self.validation_widgets[0] = progressbar.FormatLabel(
-                                f" val epoch:%.1f" % epoch +
-                                f" val reconloss:%.4f" % recon_loss_ +
-                                f" val reasoningloss:%.4f" % reasoning_loss +
-                                f" hypersphereloss val:%.4f" % hrc + 
-                                # f" val disentanglement_loss:%.4f" % disentanglement_loss +
-                                f" val classloss:%.4f" % class_loss_ +
-                                f" total val td avg distance:%.4f" % td +
-                                f" total val cb avg variance:%.4f" % ce +
-                                f" total val loss:%.4f" % loss +
-                                f" F1:%.4f" % f1_ +
-                                f" Accuracy:%.4f" % acc
+                                f" vepoch:%.1f" % epoch +
+                                f" vrcnloss:%.4f" % recon_loss_ +
+                                f" vhsploss:%.4f" % hrc + 
+                                f" vcloss:%.4f" % class_loss_ +
+                                f" v<tcd distance>:%.4f" % td +
+                                f" v<tcb variance>:%.4f" % ce +
+                                f" tv loss:%.4f" % loss +
+                                f" vF1:%.4f" % f1_ +
+                                f" vAcc:%.4f" % acc 
                             )
             self.validation_pbar.update(batch_idx)
 
@@ -401,7 +372,9 @@ class Trainer():
 
             stats = {'loss': loss, 'f1': f1, 'acc': acc, 'rloss': rloss}
             print ('Epoch: {}. Stats: {}'.format(iepoch, stats))
-
+            # print (torch.mean(self.modelclass.rattn1.weight), torch.std(self.modelclass.rattn1.weight))
+            # print (torch.mean(self.modelclass.rattn2.weight), torch.std(self.modelclass.rattn2.weight))
+            # print (torch.mean(self.modelclass.rattn3.weight), torch.std(self.modelclass.rattn3.weight))
 
             if loss < min_loss:
                 self.save_classmodel(iepoch, stats)
@@ -419,7 +392,7 @@ class Trainer():
     def save_classmodel(self, iepoch, stats):
         model = {
                 'modelclass': self.modelclass.state_dict(),
-                'discreteclassifier':self.classifier_quantized.state_dict(),
+               # 'discreteclassifier':self.classifier_quantized.state_dict(),
                 'decmodel': self.dec.state_dict(),
                 'epoch': iepoch,
                 'stats': stats
@@ -450,7 +423,7 @@ class Trainer():
 
 def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNISTv0/TI/data',
                       logs_root='../logs',
-                      name='default3',
+                      name='default4',
                       image_size=(32,32),
                       style_depth=16,
                       batch_size=50,
@@ -467,7 +440,7 @@ def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNI
                       pl_weightage=1.0,
                       seed=42,
                       nclasses=10,
-                      latent_dim=8,
+                      latent_dim=16,
                       log=True,
                       ch=32,
                       out_ch=3,
