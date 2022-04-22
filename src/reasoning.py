@@ -329,6 +329,46 @@ class Reasoning(nn.Module):
 
         loss = ce_loss + be_loss
         return y_, loss
+<<<<<<< HEAD
+=======
+ 
+
+
+
+class ReasoningModel(nn.Module):
+    def __init__(self, 
+            layers= []):
+        super(ReasoningModel, self).__init__()
+
+  
+        self.layers = nn.ModuleList([]) 
+        for il in range(len(layers) - 1):
+            block1 = []
+            binary = nn.Linear(layers[il], 
+                                            layers[il +1])
+                                            # bias=True, 
+                                            # binarize_input=True)
+            
+            block1.append(("binary{}".format(il), binary))
+            block1.append(("act{}".format(il), nn.Sigmoid()))
+            # if il < len(layers) - 2:
+            #     bn = nn.BatchNorm1d(layers[il +1])
+            #     block1.append(("bn{}".format(il), bn))
+
+            self.layers.append(nn.Sequential(OrderedDict(block1)))
+
+        # self.layers.apply(weightConstraint())
+
+    def forward(self, x):
+        input_ = x[0][0]
+        outputs = []
+        for i, block in enumerate(self.layers):
+            input_ = block(input_)
+            outputs.append(input_)
+        return outputs
+        
+
+>>>>>>> 34316afb85e9df3bb5fba9a420c640f0f2781819
  
 
 
