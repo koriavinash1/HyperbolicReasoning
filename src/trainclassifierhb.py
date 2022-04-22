@@ -14,6 +14,7 @@ from torch.autograd import Variable
 import math
 import torchvision
 from radam import RiemannianAdam
+#from rsgd import RiemannianSGD
 from loss import hpenalty, calc_pl_lengths, recon_loss, ce_loss
 
 from sklearn.metrics import accuracy_score, f1_score
@@ -24,7 +25,7 @@ import torch.nn.functional as F
 class Trainer():
     def __init__(self,
                  classifier,
-                 codebook_length=256,
+                 codebook_length=1024,
                  sampling_size=128,
                  name='default',
                  data_root='./data',
@@ -88,7 +89,6 @@ class Trainer():
             self.classifier_baseline = classifier.classifier.to(self.device).eval()
             for p in self.classifier_baseline.parameters(): p.requires_grad = False
             for p in self.feature_extractor.parameters(): p.requires_grad = False
-
             # Code book defn
         # self.modelclass = VQmodulator(features = 64,  z_channels = self.latent_size, codebooksize = self.codebook_length, device = self.device).to(self.device)
         self.modulater = modulator(features=64, z_channels=self.latent_size).to(self.device)
@@ -96,21 +96,25 @@ class Trainer():
                                                codebooksize=self.codebook_length, device=self.device).to(self.device)
 
         # Quantized classifier
+        """
         self.inchannel = self.latent_size if self.trim else np.prod(self.latentdim)
         clfq = []
         clfq.append(nn.Linear(self.inchannel, hiddendim))
         clfq.append(nn.Linear(hiddendim, self.nclasses))
 
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
+        """
+        self.clf = nn.Linear(self.latent_size, self.nclasses).to(self.device)
         # Optimizers
-        self.opt = Adam(list(self.modulater.parameters()) + list(self.classifier_quantized.parameters()),# + list(self.modelclass.parameters()),
-                        lr=self.lr,
-                        weight_decay=self.wd)
+        self.opt = Adam(list(self.modulater.parameters()) + list(self.clf.parameters())+ list(self.modelclass.parameters()),
+        lr=self.lr,
+        weight_decay=self.wd)
         #self.opt = torch.optim.SGD(self.modulater.parameters(), lr=self.lr,weight_decay=self.wd, momentum=0.9)
-        #self.opt1 = RiemannianSGD(self.modelclass.parameters(), lr=self.lr)
-        self.opt1 = RiemannianAdam(self.modelclass.parameters(), lr=self.lr, weight_decay=self.wd)
-        self.LR_sch = ReduceLROnPlateau(self.opt)
-        self.LR_sch1 = ReduceLROnPlateau(self.opt1)
+        #self.opt1 = RiemannianAdam(self.modelclass.parameters(), lr=self.lr)
+        #self.opt = RiemannianAdam(list(self.modelclass.parameters()) +  list(self.modulater.parameters()) + list(self.clf.parameters()),
+        #lr=0.0005, weight_decay=self.wd)
+        #self.LR_sch = ReduceLROnPlateau(self.opt)
+        #self.LR_sch1 = ReduceLROnPlateau(self.opt1)
 
         # Decoder and optimizer
         self.dec = Decoder(ch=ch,
@@ -126,7 +130,7 @@ class Trainer():
         self.opt2 = torch.optim.Adam(self.dec.parameters(),
                          lr=self.lr,
                          weight_decay=self.wd)
-        self.LR_sch2 = ReduceLROnPlateau(self.opt2)
+        #self.LR_sch2 = ReduceLROnPlateau(self.opt2)
 
         # number of parameters
         print('FeatureExtractor: Total number of trainable params: {}/{}'.format(
@@ -173,37 +177,51 @@ class Trainer():
             m = nn.Softmax(dim=1)
 
             self.opt.zero_grad()
-            self.opt1.zero_grad()
+            #self.opt1.zero_grad()
             self.opt2.zero_grad()
 
             # feature extraction
             with torch.no_grad():
                 f = self.feature_extractor(data)
                 features1 = f.view(f.size(0), -1)
-                conti_target = m(self.classifier_baseline(features1))
-                conti_target = torch.argmax(conti_target, 1)
+                conti_target1 = m(self.classifier_baseline(features1))
+                conti_target = torch.argmax(conti_target1, 1)
             
 
             # code book sampling
             mf = self.modulater(f)
 
-            quant_loss, symbols, decoder_features, codebookdistance, distanceuncertainty, pred, dis_target = self.modelclass(mf)
+            quant_loss, symbols, decoder_features, codebookdistance, distanceuncertainty, pred = self.modelclass(mf)
             #quant_loss, symbols, decoder_features, codebookdistance, distanceuncertainty = self.modelclass(mf)
+            """
             classblock = torch.ones_like(distanceuncertainty)
             classblock = classblock * conti_target.unsqueeze(1).unsqueeze(2)
-            print(torch.mean(symbols))
 
             dis_target1 = m(self.cq(decoder_features))
-            cl = ce_loss(logits=dis_target1, target=conti_target)
-            class_loss_ = ce_loss(logits=pred.type(torch.cuda.FloatTensor), target=conti_target)
-            tclass_loss = ce_loss(logits=dis_target.type(torch.cuda.FloatTensor), target=classblock.type(torch.cuda.LongTensor))
+            """
+            #print(torch.squeeze(m(torch.mean(self.clf(pred), dim = 1))))
+            #print(torch.mean(pred, dim=1))
+            cl = ce_loss(logits=torch.squeeze(m(self.clf(torch.mean(pred, dim=1)))), target=conti_target)
+            #cl = recon_loss(logits=torch.squeeze(m(torch.mean(self.clf(pred), dim = 1))), target=conti_target1)
+            #class_loss_ = ce_loss(logits=pred.type(torch.cuda.FloatTensor), target=conti_target)
+            #tclass_loss = ce_loss(logits=dis_target.type(torch.cuda.FloatTensor), target=classblock.type(torch.cuda.LongTensor))
             # class_loss_ = recon_loss(logits = dis_target, target = conti_target)
 
             loss = quant_loss +cl #+ class_loss_+ tclass_loss +cl# quant_loss = quant_loss + cb_disentanglement_loss
             loss.backward()
+            """            
+            for param in self.modelclass.parameters():
+                print(param.grad)
+
+            for param in self.clf.parameters():
+                print(param.grad)
+            
+            for param in self.modulater.parameters():
+                print(param.grad)
+            """
             #torch.nn.utils.clip_grad_norm(self.modelclass.parameters(), 1)
             self.opt.step()
-            self.opt1.step()
+            #self.opt1.step()
 
             # disentanglement loss
             # disentanglement_loss = torch.mean(calc_pl_lengths(hidden_dim, recon)) + \
@@ -233,16 +251,17 @@ class Trainer():
 
 
 
-            self.training_widgets[0] = progressbar.FormatLabel(
+            #self.training_widgets[0] = progressbar.FormatLabel(
+            print(
                 f" train epoch:%.1f" % epoch +
-                f" train classloss:%.4f" % class_loss_ +
+             #   f" train classloss:%.4f" % class_loss_ +
                 f" train totalclassloss:%.4f" % cl +
                 f" train reconloss:%.4f" % recon_loss_ +
                 f" train qloss:%.4f" % quant_loss +
                 f" total train cb avg distance:%.4f" % codebookdistance +
                 f" total train loss:%.4f" % loss
             )
-            self.training_pbar.update(batch_idx)
+            #self.training_pbar.update(batch_idx)
         pass
 
     @torch.no_grad()
@@ -266,16 +285,18 @@ class Trainer():
 
             # code book sampling
             mf = self.modulater(features)
-            quant_loss, symbols, decoder_features, codebookdistance, distanceuncertainty, pred, dis_target = self.modelclass( mf)
+            quant_loss, symbols, decoder_features, codebookdistance, distanceuncertainty, pred = self.modelclass( mf)
         #    quant_loss, symbols, decoder_features, codebookdistance, distanceuncertainty = self.modelclass( mf)
+            """
             classblock = torch.ones_like(distanceuncertainty)
             classblock = classblock * conti_target.unsqueeze(1).unsqueeze(2)
             dis_target1 = m(self.cq(decoder_features))
-            cl = ce_loss(logits=dis_target1, target=conti_target)
+            """
+            #cl = ce_loss(logits=torch.squeeze(m(torch.mean(self.clf(pred), dim = 1))), target=conti_target)
+            cl = ce_loss(logits=torch.squeeze(m(self.clf(torch.mean(pred, dim=1)))), target=conti_target)
 
-
-            class_loss_ = ce_loss(logits=pred.type(torch.cuda.FloatTensor), target=conti_target)
-            tclass_loss = ce_loss(logits=dis_target.type(torch.cuda.FloatTensor), target=classblock.type(torch.cuda.LongTensor))
+            #class_loss_ = ce_loss(logits=pred.type(torch.cuda.FloatTensor), target=conti_target)
+            #tclass_loss = ce_loss(logits=dis_target.type(torch.cuda.FloatTensor), target=classblock.type(torch.cuda.LongTensor))
              #class_loss_ = recon_loss(logits = dis_target, target = conti_target)
 
             #loss = class_loss_ + quant_loss + tclass_loss
@@ -307,25 +328,26 @@ class Trainer():
             mean_recon_loss_.append(recon_loss_.cpu().numpy())
 
             # acc metrics
-            acc = accuracy_score(torch.argmax(dis_target1, 1).cpu().numpy(),
+            acc = accuracy_score(torch.argmax(torch.squeeze(m(torch.mean(self.clf(pred), dim = 1))), 1).cpu().numpy(),
                                  conti_target.cpu().numpy())
-            f1_ = f1_score(torch.argmax(dis_target1, 1).cpu().numpy(),
+            f1_ = f1_score(torch.argmax(torch.squeeze(m(torch.mean(self.clf(pred), dim = 1))), 1).cpu().numpy(),
                            conti_target.cpu().numpy(), average='micro')
 
             mean_f1_score.append(f1_)
             mean_acc_score.append(acc)
 
-            self.validation_widgets[0] = progressbar.FormatLabel(
+            #self.validation_widgets[0] = progressbar.FormatLabel(
+            print( 
                 f" val epoch:%.1f" % epoch +
                 f" val reconloss:%.4f" % recon_loss_ +
-                f" val classloss:%.4f" % class_loss_ +
+                #f" val classloss:%.4f" % class_loss_ +
                 f" val totalclassloss:%.4f" % cl +
                 f" total val td avg distance:%.4f" % codebookdistance +
                 f" total val loss:%.4f" % loss +
                 f" F1:%.4f" % f1_ +
                 f" Accuracy:%.4f" % acc
             )
-            self.validation_pbar.update(batch_idx)
+            #self.validation_pbar.update(batch_idx)
 
         return (np.mean(mean_loss),
                 np.mean(mean_recon_loss_),
@@ -355,14 +377,14 @@ class Trainer():
             if loss < min_loss:
                 self.save_classmodel(iepoch, stats)
                 min_loss = loss
-            else:
-                self.LR_sch.step(loss)
+  #          else:
+#                self.LR_sch.step(loss)
            #     self.LR_sch1.step(loss)
 
             if rloss < min_recon:
                 min_recon = rloss
-            else:
-                self.LR_sch2.step(loss)
+   #         else:
+ #               self.LR_sch2.step(loss)
 
     def save_classmodel(self, iepoch, stats):
         model = {
@@ -400,7 +422,7 @@ def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNI
                       style_depth=16,
                       batch_size=50,
                       nepochs=50,
-                      learning_rate=2e-4,
+                      learning_rate=2e-3,
                       num_workers=None,
                       save_every=1000,
                       aug_prob=0.,
@@ -412,7 +434,7 @@ def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNI
                       pl_weightage=1.0,
                       seed=42,
                       nclasses=10,
-                      latent_dim=16,
+                      latent_dim=32,
                       log=True,
                       ch=32,
                       out_ch=3,
