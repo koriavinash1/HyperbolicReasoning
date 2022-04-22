@@ -640,22 +640,22 @@ class HierarchyVQmodulator(nn.Module):
         shape = x2.shape
         assert self.emb_dim == shape[2]*shape[3]
 
-        z_q1, loss1, sampled_idx1, ce1, td1, hrc1, r1 = self.quantize(x2)
+        z_q1, loss1, sampled_idx1, ce1, td1, hrc1, _, r1 = self.quantize(x2)
         z_q1_attn = self.attention(x2, self.q1w, z_q1, self.q1conv)
 
 
-        z_q2, loss2, sampled_idx2, ce2, td2, hrc2, r2 = self.quantize1(z_q1_attn,
+        z_q2, loss2, sampled_idx2, ce2, td2, hrc2, cbl2, r2 = self.quantize1(z_q1_attn,
                                                                     self.quantize.embedding.weight,
                                                                     self.rattn1.weight.T)
         z_q2_attn = self.attention(z_q1_attn, self.q2w, z_q2, self.q2conv)
 
-        z_q3, loss3, sampled_idx3, ce3, td3, hrc3, r3 = self.quantize2(z_q2_attn,
+        z_q3, loss3, sampled_idx3, ce3, td3, hrc3, cbl3, r3 = self.quantize2(z_q2_attn,
                                                                     self.quantize1.embedding.weight,
                                                                     self.rattn2.weight.T)
         z_q3_attn = self.attention(z_q2_attn, self.q3w, z_q3, self.q3conv)
 
 
-        z_q4, loss4, sampled_idx4, ce4, td4, hrc4, r4 = self.quantize3(z_q3_attn,
+        z_q4, loss4, sampled_idx4, ce4, td4, hrc4, cbl4, r4 = self.quantize3(z_q3_attn,
                                                                     self.quantize2.embedding.weight,
                                                                     self.rattn3.weight.T)
 
@@ -666,14 +666,16 @@ class HierarchyVQmodulator(nn.Module):
         td = 0.25*(td1 + td2 + td3 + td4) 
         hrc = 0.25*(hrc1 + hrc2 + hrc3 + hrc4) 
         r = 0.25*(r1 + r2 + r3 + r4)
+        cb_loss = 0.25*(cbl2 + cbl3 + cbl4)
+
 
         # import pdb; pdb.set_trace()
         # print(list(self.reasoning_parameters()))
 
         # reasoning weights regularizations:
-        # all_linear1_params = torch.cat([x.view(-1) for x in list(self.reasoning_parameters())])
-        # l1_regularization = 1e-4*torch.norm(all_linear1_params, 1)
-        # loss += l1_regularization
+        all_linear1_params = torch.cat([x.view(-1) for x in list(self.reasoning_parameters())])
+        l1_regularization = 1e-4*torch.norm(all_linear1_params, 1)
+        loss += l1_regularization
 
         if self.trim and self.combine:
             z_combine = torch.cat([z_q1, z_q2, z_q3, z_q4], dim=1)
@@ -684,7 +686,7 @@ class HierarchyVQmodulator(nn.Module):
                     [z_q1, z_q2, z_q3, z_q4],
                     z_q,  
                     [sampled_idx1, sampled_idx2, sampled_idx3, sampled_idx4],
-                    ce, td, hrc, r)
+                    ce, td, hrc, cb_loss, r)
 
 
 class Clamp(torch.autograd.Function):
@@ -854,9 +856,11 @@ class GumbelQuantize2DHS(nn.Module):
 
         z_q = torch.einsum('b n, n d -> b d', soft_one_hot, cb)
 
+        cb_loss = 0
         if not (prev_cb is None):
             cb_attn = torch.einsum('md,mn->nd', prev_cb, attention_w)
-            z_q += 0.2*torch.einsum('b n, n d -> b d', soft_one_hot, cb_attn)
+            z_q2 = torch.einsum('b n, n d -> b d', soft_one_hot, cb_attn)
+            cb_loss = F.mse_loss(z_q, z_q2)
 
 
         z_q = z_q.view(z.shape)
@@ -869,7 +873,7 @@ class GumbelQuantize2DHS(nn.Module):
             ind = self.remap_to_used(ind)
 
 
-        loss = kl_loss 
+        loss = kl_loss + cb_loss
 
         if self.disentangle:
            loss += hsw + disentanglement_loss
@@ -882,6 +886,7 @@ class GumbelQuantize2DHS(nn.Module):
                     codebookvariance, 
                     total_min_distance,  
                     hsw, 
+                    cb_loss,
                     torch.mean(self.r))
 
     def get_codebook_entry(self, indices, shape):
@@ -1114,6 +1119,7 @@ class VectorQuantizer2DHS(nn.Module):
                     codebookvariance, 
                     total_min_distance,  
                     hsw, 
+                    cb_loss,
                     torch.mean(self.r))
                     
 

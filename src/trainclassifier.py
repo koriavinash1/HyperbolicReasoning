@@ -38,12 +38,9 @@ class Trainer():
                     learning_rate = 1e-3,
                     num_workers =  None,
                     save_every = 'best',
-                    aug_prob = 0.,
                     recon_loss_weightage = 1.0,
                     disentangle_weightage = 1.0,
                     quantization_weightage = 1.0,
-                    hessian_weightage = 1.0,
-                    pl_weightage = 1.0,
                     seed = 42,
                     nclasses=10,
                     latent_dim=256,
@@ -56,7 +53,7 @@ class Trainer():
                     in_channels =3,
                     hiddendim = 64,
                     log = False,
-                    trim=True,
+                    trim=False,
                     combine=False,
                     reasoning=True):
 
@@ -131,7 +128,8 @@ class Trainer():
         # Optimizers
         self.opt = Adam(list(self.modelclass.parameters()) + \
                         list(self.classifier_quantized.parameters()),
-                        lr=self.lr)
+                        lr=self.lr,
+                        weight_decay=self.wd)
 
         # self.opt = MomentumWithThresholdBinaryOptimizer(
         #                 list(self.modelclass.reasoning_parameters()),
@@ -218,7 +216,7 @@ class Trainer():
                 
 
             # code book sampling
-            quant_loss, all_features, features, feature_idxs, ce , td, hrc, r = self.modelclass(f)
+            quant_loss, all_features, features, feature_idxs, ce , td, hrc, cb_loss, r = self.modelclass(f)
 
 
             if isinstance(features, list):
@@ -254,6 +252,7 @@ class Trainer():
                                 f" tcloss:%.4f" % class_loss_ +
                                 f" trcnloss:%.4f" % recon_loss_ +
                                 f" tqloss:%.4f" % quant_loss +
+                                f" tcbloss:%.4f" % cb_loss +
                                 f" radius:%.4f" % r +
                                 f" thsploss:%.4f" % hrc +
                                 f" t<cb distance>:%.4f" % td +
@@ -286,7 +285,7 @@ class Trainer():
 
 
             # code book sampling
-            quant_loss, all_features, features, feature_idxs, ce , td, hrc, r = self.modelclass(features)
+            quant_loss, all_features, features, feature_idxs, ce , td, hrc, cb_loss, r = self.modelclass(features)
 
             if isinstance(features, list):
                 classifier_features = features[-1]
@@ -335,6 +334,8 @@ class Trainer():
             self.validation_widgets[0] = progressbar.FormatLabel(
                                 f" vepoch:%.1f" % epoch +
                                 f" vrcnloss:%.4f" % recon_loss_ +
+                                f" vqloss:%.4f" % quant_loss +
+                                f" vcbloss:%.4f" % cb_loss +
                                 f" vhsploss:%.4f" % hrc + 
                                 f" vcloss:%.4f" % class_loss_ +
                                 f" v<tcd distance>:%.4f" % td +
@@ -382,6 +383,7 @@ class Trainer():
             else:
                 self.LR_sch.step(loss)
 
+
             if rloss < min_recon:
                 min_recon = rloss
             else:
@@ -392,7 +394,7 @@ class Trainer():
     def save_classmodel(self, iepoch, stats):
         model = {
                 'modelclass': self.modelclass.state_dict(),
-               # 'discreteclassifier':self.classifier_quantized.state_dict(),
+                'discreteclassifier':self.classifier_quantized.state_dict(),
                 'decmodel': self.dec.state_dict(),
                 'epoch': iepoch,
                 'stats': stats
@@ -431,13 +433,10 @@ def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNI
                       learning_rate=2e-4,
                       num_workers=None,
                       save_every=1000,
-                      aug_prob=0.,
                       sigma = 0.1,
                       recon_loss_weightage=1.0,
                       disentangle_weightage=1.0,
                       quantization_weightage=1.0,
-                      hessian_weightage=1.0,
-                      pl_weightage=1.0,
                       seed=42,
                       nclasses=10,
                       latent_dim=16,
@@ -463,12 +462,9 @@ def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNI
         num_workers=num_workers,
         save_every=save_every,
         sigma= sigma,
-        aug_prob=aug_prob,
         recon_loss_weightage=recon_loss_weightage,
         disentangle_weightage=disentangle_weightage,
         quantization_weightage=quantization_weightage,
-        hessian_weightage=hessian_weightage,
-        pl_weightage=pl_weightage,
         seed=seed,
         nclasses=nclasses,
         latent_dim=latent_dim,
