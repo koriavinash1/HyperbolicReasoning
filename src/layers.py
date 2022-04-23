@@ -926,7 +926,6 @@ class VectorQuantizer2DHS(nn.Module):
         n_e : total number of codebook vectors
         e_dim: codebook vector dimension
         beta: factor for legacy term
-
         '''
         self.n_e = n_e
         self.e_dim = e_dim
