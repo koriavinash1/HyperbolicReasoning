@@ -13,7 +13,7 @@ from geomstats.geometry.hypersphere import HypersphereMetric
 from geomstats.geometry.riemannian_metric import RiemannianMetric
 from mathutils import artanh, tanh, arcosh, cosh, sinh
 import torch.nn.init as init
-
+from reasoning import BinaryLinear
 from torch.nn.modules.module import Module
 def nonlinearity(x):
     # swish
@@ -826,13 +826,15 @@ class VectorQuantizer2DHS(nn.Module):
         self.eps = {torch.float32: 4e-3, torch.float64: 1e-5}
         self.min_norm = 1e-15
         # uniformly sampled initialization
-        sphere = Hypersphere(dim=self.e_dim-1)
+        sphere = Hypersphere(dim=self.e_dim - 1)
         self.embedding = nn.Embedding(self.n_e, 
                                             self.e_dim)
 
+        self.h =  HypLinear(e_dim, e_dim, 1, 0, True)
+        self.h1 =  HypLinear(e_dim, 3, 1, 0, True)        
+
+
         points_in_manifold = torch.Tensor(sphere.random_uniform(n_samples=self.n_e))
-        if not disentangle:
-           points_in_manifold = self.expmap0(points_in_manifold, 1)
         self.embedding.weight.data.copy_(points_in_manifold).requires_grad=True
 
         #self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
@@ -879,19 +881,17 @@ class VectorQuantizer2DHS(nn.Module):
     def rbf(self, d):
         return (d ** 2).mean(1).div(2 * self.sigma ** 2).mul(-1).exp()
 
-    """ 
+    """    
     def expmap0(self, u, c):
         sqrt_c = c ** 0.5
         u_norm = torch.clamp_min(u.norm(dim=1, p=2, keepdim=True), self.min_norm)
         gamma_1 = tanh(sqrt_c * u_norm) * u / (sqrt_c * u_norm)
         return gamma_1
-
     def logmap0(self, p, c):
         sqrt_c = c ** 0.5
         p_norm = p.norm(dim=1, p=2, keepdim=True).clamp_min(self.min_norm)
         scale = 1. / sqrt_c * artanh(sqrt_c * p_norm) / p_norm
         return scale * p
-
     def proj(self, x, c):
         norm = torch.clamp_min(x.norm(dim=-1, keepdim=True, p=2), self.min_norm)
         maxnorm = (1 - self.eps[x.dtype]) / (c ** 0.5)
@@ -934,45 +934,19 @@ class VectorQuantizer2DHS(nn.Module):
         theta = torch.clamp(x[:, 0:1] / sqrtK, min=1.0 + self.epsilon)
         res[:, 1:] = sqrtK * arcosh(theta) * y / y_norm
         return res
-    
-    
-    def dist(self, u, v):
-        
-        sqdist = torch.einsum('bd,dn->bn', u, rearrange(v, 'n d -> d n'))
-        """
-        u = torch.t(u[:,0].repeat(u.shape[1], 1))
-        v = (v[:, 0].repeat(v.shape[1], 1))
-        uv = torch.einsum('bd,dn->bn', u, v)
-        theta = sqdist - 2* uv
-        theta = torch.clamp(theta, min=1.0 + self.epsilon)
-        return arcosh(theta) ** 2
-        """
-        theta = torch.clamp(sqdist, min=1.0 + self.epsilon)
-        return arcosh(theta) ** 2
-    def minkowski_dot(self, x, y, keepdim=True):
-        res = torch.sum(x * y, dim=1) - 2 * x[..., 0] * y[..., 0]
-        if keepdim:
-            res = res.view(res.shape + (1,))
-        return res
 
-    def minkowski_norm(self, u, keepdim=True):
-        dot = self.minkowski_dot(u, u, keepdim=keepdim)
-        return torch.sqrt(torch.clamp(dot, min=self.epsilon))
+    def to_poincare(self, x, c):
+        K = 1. / c
+        sqrtK = K ** 0.5
+        d = x.size(-1) - 1
+        return sqrtK * x.narrow(-1, 1, d) / (x[:, 0:1] + sqrtK)
+
+    def to_hyperboloid(self, x, c):
+        K = 1./ c
+        sqrtK = K ** 0.5
+        sqnorm = torch.norm(x, p=2, dim=1, keepdim=True) ** 2
+        return sqrtK * torch.cat([K + sqnorm, 2 * sqrtK * x], dim=1) / (K - sqnorm)
     
-    def sdist(self, x, y):
-        prod = self.minkowski_dot(x, y)
-        theta = torch.clamp(prod, min=1.0 + self.epsilon)
-        sqdist = arcosh(theta) ** 2
-        # clamp distance to avoid nans in Fermi-Dirac decoder
-        return torch.clamp(sqdist, max=50.0)
-    
-      
-    def sdist(self, u, v):
-        res = torch.sum(u * v, dim = 1)
-        theta = torch.clamp(res, min=1.0 + self.epsilon)
-        return arcosh(theta) ** 2
-    
-    """
     def dist(self, u, v):
         sqdist = torch.sum(u ** 2, dim=1,  keepdim=True) + \
                  torch.sum(v ** 2, dim=1) - 2 * \
@@ -987,24 +961,46 @@ class VectorQuantizer2DHS(nn.Module):
         z = torch.sqrt(y - 1)
         return torch.clamp(torch.log(x + z), max =2.5)
 
+
+    """
+    def dist(self, u, v):
+        sqdist = torch.einsum('bd,dn->bn', u, rearrange(v, 'n d -> d n'))
+                
+        u = torch.t(u[:,0].repeat(u.shape[1], 1))
+        v = (v[:, 0].repeat(v.shape[1], 1))
+        uv = torch.einsum('bd,dn->bn', u, v)
+        theta = sqdist - 2* uv
+        theta = torch.clamp(theta, min=1.0 + self.epsilon)
+        return arcosh(theta) ** 2
+        
+        theta = torch.clamp(sqdist, min=1.0 + self.epsilon)
+        return arcosh(theta) ** 2
+    def minkowski_dot(self, x, y, keepdim=True):
+        res = torch.sum(x * y, dim=1) - 2 * x[..., 0] * y[..., 0]
+        if keepdim:
+            res = res.view(res.shape + (1,))
+        return res
+
+    def minkowski_norm(self, u, keepdim=True):
+        dot = self.minkowski_dot(u, u, keepdim=keepdim)
+        return torch.sqrt(torch.clamp(dot, min=self.epsilon))
+    
+    def sdist(self, x, y, c):
+        K = 1. / c
+        prod = self.minkowski_dot(x, y)
+        theta = torch.clamp(prod / K, min=1.0 + self.epsilon)
+        sqdist = K * arcosh(theta) ** 2
+        # clamp distance to avoid nans in Fermi-Dirac decoder
+        return torch.clamp(sqdist, max=50.0)
+    
+
     def sdist(self, u, v):
-        sqdist = torch.sum((u - v) ** 2, dim=-1)
-        squnorm = torch.sum(u ** 2, dim=-1)
-        sqvnorm = torch.sum(v ** 2, dim=-1)
-        x = 1 + 2 * sqdist / ((1 - squnorm) * (1 - sqvnorm)) + self.epsilon
-        y =  torch.clamp(x ** 2, min=1.0 + self.epsilon)
-        z = torch.sqrt(y - 1)
-        return torch.clamp(torch.log(x + z), max =2.5)
+        res = torch.sum(u * v, dim = 1)
     """
     def HLoss(self, x):
         b = F.softmax(x, dim=1) * F.log_softmax(x, dim=1)
         b = -1.0 * b.sum()
         return b
-    def to_poincare(self, x, c):
-        K = 1. / c
-        sqrtK = K ** 0.5
-        d = x.size(-1) - 1
-        return sqrtK * x.narrow(-1, 1, d) / (x[:, 0:1] + sqrtK)
 
     def unmap_to_all(self, inds):
         ishape = inds.shape
@@ -1028,72 +1024,62 @@ class VectorQuantizer2DHS(nn.Module):
         # reshape z -> (batch, height, width, channel) and flatten
         # z = rearrange(z, 'b c h w -> b h w c').contiguous()
         z_flattened = z.view(-1, self.e_dim)
-        if not (prev_cb is None):
-           z_flattened = self.expmap0(z_flattened, 1)
-           
-        if not (prev_cb is None):        
-            d = self.dist(z_flattened, self.embedding.weight)
-            d1 = self.dist(self.embedding.weight, self.embedding.weight)
-            min_distance = torch.kthvalue(d1, 2, 0)
-            total_min_distance = torch.mean(min_distance[0])
-            codebookvariance = torch.mean(torch.var(d1, 1))
-            min_encoding_indices = torch.argmin(d, dim=1)
-        else:
-            # intra distance (gdes-distance) between codebook vector 
-            d1 = torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
-            ed1 = torch.tensor(self.ed(self.embedding.weight))
-            ed1 = ed1.repeat(self.n_e, 1)
-            ed2 = ed1.transpose(0,1)
-            ed3 = ed1 * ed2
-            edx = d1/ed3.to(self.device)
-            edx = torch.clamp(edx, min=-0.99999, max=0.99999)
-            # d = torch.acos(d)
-            d1 = torch.acos(edx)
-            
-
-            # d1 = torch.sum(self.embedding.weight ** 2, dim=1, keepdim=True) + \
-            #      torch.sum(self.embedding.weight ** 2, dim=1) - 2 * \
-            #      torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
-            
-            min_distance = torch.kthvalue(d1, 2, 0)
-            total_min_distance = torch.mean(min_distance[0])
-            codebookvariance = torch.mean(torch.var(d1, 1))
-            # codebookvariance = torch.var(min_distance[0])
-
-
-            # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
-            d = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + \
-                torch.sum(self.embedding.weight**2, dim=1) - 2 * \
-                torch.einsum('bd,dn->bn', z_flattened, rearrange(self.embedding.weight, 'n d -> d n'))
-            
-            min_encoding_indices = torch.argmin(d, dim=1)
-            # distances = d[range(d.shape[0]), min_encoding_indices].view(z.shape[0], z.shape[1])
-            # distances = self.rbf(distances)
         
+
+        # intra distance (gdes-distance) between codebook vector 
+        d1 = torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
+        ed1 = torch.tensor(self.ed(self.embedding.weight))
+        ed1 = ed1.repeat(self.n_e, 1)
+        ed2 = ed1.transpose(0,1)
+        ed3 = ed1 * ed2
+        edx = d1/ed3.to(self.device)
+        edx = torch.clamp(edx, min=-0.99999, max=0.99999)
+        # d = torch.acos(d)
+        d1 = torch.acos(edx)
+        
+
+        # d1 = torch.sum(self.embedding.weight ** 2, dim=1, keepdim=True) + \
+        #      torch.sum(self.embedding.weight ** 2, dim=1) - 2 * \
+        #      torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
+        
+        min_distance = torch.kthvalue(d1, 2, 0)
+        total_min_distance = torch.mean(min_distance[0])
+        codebookvariance = torch.mean(torch.var(d1, 1))
+        # codebookvariance = torch.var(min_distance[0])
+
+
+        # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
+        d = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + \
+            torch.sum(self.embedding.weight**2, dim=1) - 2 * \
+            torch.einsum('bd,dn->bn', z_flattened, rearrange(self.embedding.weight, 'n d -> d n'))
+        
+        min_encoding_indices = torch.argmin(d, dim=1)
+        # distances = d[range(d.shape[0]), min_encoding_indices].view(z.shape[0], z.shape[1])
+        # distances = self.rbf(distances)
+
 
         # get quantized vector and normalize
         z_q = self.embedding(min_encoding_indices).view(z.shape)
-        z_qf = self.embedding(min_encoding_indices)
         cb_loss = 0
-        """
+        prevcb=  cb_attnp = None
+                
         if not (prev_cb is None):
+            prevcb = self.to_poincare(self.h1(self.expmap0(prev_cb.clone().detach(),1)),1)
             cb_attn = torch.einsum('md,mn->nd', 
-                                    self.expmap0(prev_cb.clone().detach(),1), 
+                                    self.logmap0(self.h(self.expmap0(prev_cb.clone().detach(), 1)),1), 
                                     attention_w)
-            #adj = torch.heaviside(attention_w, torch.tensor([0.0]))
-            #cb_point= self.to_poincare(cb_attn, 1)
-            
             #cb_attn = self.logmap0(cb_attn, 1)
+            cb_attnp = self.to_poincare(self.h1(self.expmap0(cb_attn, 1)), 1)
             z_q2 = cb_attn[min_encoding_indices].view(z.shape)
             cb_loss = F.mse_loss(z_q, z_q2)
         
+        """
         if not (prev_cb is None):
             cb_attn = torch.einsum('md,mn->nd',
                                     prev_cb.clone().detach(),
                                     attention_w)
             z_q2 = cb_attn[min_encoding_indices].view(z.shape)
             cb_loss = F.mse_loss(z_q, z_q2)
-
         """
         hsw = torch.Tensor(self.hsreg(self.embedding.weight)).to(self.device)
         hsw = torch.mean(torch.square(self.r - hsw))
@@ -1103,39 +1089,21 @@ class VectorQuantizer2DHS(nn.Module):
         min_encodings = None
         self.r = self.clamp_class.apply(self.r)
         # compute loss for embedding
-        if not (prev_cb is None):
-            if not self.legacy:
-                loss = self.beta * torch.mean(self.sdist(z_qf.detach(),z_flattened))
-                if not self.ignorezq:
-                    loss += torch.mean(self.sdist(z_qf, z_flattened.detach()))
-            else:
-                loss = torch.mean(self.sdist(z_qf.detach(), z_flattened))
-                if not self.ignorezq:
-                    loss += self.beta * torch.mean(self.sdist(z_qf, z_flattened.detach()))
-            loss += cb_loss
-            disentanglement_loss = codebookvariance - total_min_distance
-            if self.disentangle:
-                loss += hsw
-                loss += disentanglement_loss
-            z_qf = z_flattened + (z_qf - z_flattened).detach()
-            z_q = self.logmap0(z_qf, 1).view(z.shape)
+         
+        if not self.legacy:
+            loss = self.beta * torch.mean((z_q.detach() - z) ** 2) 
+            if not self.ignorezq:
+                loss += torch.mean((z_q - z.detach()) ** 2) 
         else:
-            if not self.legacy:
-                loss = self.beta * torch.mean((z_q.detach() - z) ** 2)
-                if not self.ignorezq:
-                    loss += torch.mean((z_q - z.detach()) ** 2)
-            else:
-                loss = torch.mean((z_q.detach() - z) ** 2)
-                if not self.ignorezq:
-                    loss += self.beta * torch.mean((z_q - z.detach()) ** 2)
-        
-            loss += cb_loss
-            disentanglement_loss = codebookvariance - total_min_distance
-            if self.disentangle:
-                loss += hsw
-                loss += disentanglement_loss
-            z_q = z + (z_q - z).detach()
+            loss = torch.mean((z_q.detach() - z) ** 2)  
+            if not self.ignorezq:
+                loss += self.beta * torch.mean((z_q - z.detach()) ** 2)
 
+        loss += cb_loss
+        disentanglement_loss = codebookvariance - total_min_distance
+        if self.disentangle:
+            loss += hsw
+            loss += disentanglement_loss
 
         """
         if not self.legacy:
@@ -1144,10 +1112,8 @@ class VectorQuantizer2DHS(nn.Module):
             loss = self.beta * torch.mean((z_q - z.detach()) ** 2) +hsw - total_min_distance
         """ 
 
-        # preserve gradient
-        #z_qf = z_flattened + (z_qf - z_flattened).detach()
-        #z_q = z + (z_q - z).detach()
-        #z_q = self.logmap0(z_qf, 1).view(z.shape)
+        # preserve gradients
+        z_q = z + (z_q - z).detach()
 
         # reshape back to match original input shape
         # z_q = rearrange(z_q, 'b h w c-> b c h w').contiguous()
@@ -1171,7 +1137,7 @@ class VectorQuantizer2DHS(nn.Module):
                     codebookvariance, 
                     total_min_distance,  
                     hsw, 
-                    torch.mean(self.r))
+                    torch.mean(self.r), prevcb, attention_w, cb_attnp)
                     
 
     def get_codebook_entry(self, indices, shape):
@@ -1215,7 +1181,6 @@ class VectorQuantizer2DHS1(nn.Module):
         n_e : total number of codebook vectors
         e_dim: codebook vector dimension
         beta: factor for legacy term
-
         '''
         self.n_e = n_e
         self.e_dim = e_dim
@@ -1370,10 +1335,8 @@ class VectorQuantizer2DHS1(nn.Module):
         else:
             loss = torch.mean((z_flattened1.detach() - z_flattened) ** 2) + self.beta * \
                    torch.mean((z_flattened1 - z_flattened.detach()) ** 2) + hsw
-
         z_flattened1 = z_flattened + (z_flattened1 - z_flattened).detach()
         #disentanglement_loss = codebookvariance - total_min_distance
-
         """
         """
         if not self.legacy:
@@ -1622,18 +1585,51 @@ class HierarchyTFVQmodulator(nn.Module):
                                         padding=1,
                                         stride=2,
                                         )
-
         # self.BottleneckMLP = BottleneckMLP(input = input, hiddendim = hiddendim)
-
         self.z_channels = z_channels
-
     def attention(self, input_,  w, x, conv=None):
         x = input_ + (w * x.view(-1, self.z_channels)).view(x.shape)
-
         if not (conv is None):
             x = conv(x)
         return x
     """
+    
+    def proj(self, x, c):
+        K = 1. / c
+        d = x.size(-1) - 1
+        y = x.narrow(-1, 1, d)
+        y_sqnorm = torch.norm(y, p=2, dim=1, keepdim=True) ** 2
+        mask = torch.ones_like(x)
+        mask[:, 0] = 0
+        vals = torch.zeros_like(x)
+        vals[:, 0:1] = torch.sqrt(torch.clamp(K + y_sqnorm, min=self.eps[x.dtype]))
+        return vals + mask * x
+
+    def expmap0(self, u, c):
+        K = 1. / c
+        sqrtK = K ** 0.5
+        d = u.size(-1) - 1
+        x = u.narrow(-1, 1, d).view(-1, d)
+        x_norm = torch.norm(x, p=2, dim=1, keepdim=True)
+        x_norm = torch.clamp(x_norm, min=self.min_norm)
+        theta = x_norm / sqrtK
+        res = torch.ones_like(u)
+        res[:, 0:1] = sqrtK * cosh(theta)
+        res[:, 1:] = sqrtK * sinh(theta) * x / x_norm
+        return self.proj(res, c)
+
+    def logmap0(self, x, c):
+        K = 1. / c
+        sqrtK = K ** 0.5
+        d = x.size(-1) - 1
+        y = x.narrow(-1, 1, d).view(-1, d)
+        y_norm = torch.norm(y, p=2, dim=1, keepdim=True)
+        y_norm = torch.clamp(y_norm, min=self.min_norm)
+        res = torch.zeros_like(x)
+        theta = torch.clamp(x[:, 0:1] / sqrtK, min=1.0 + self.epsilon)
+        res[:, 1:] = sqrtK * arcosh(theta) * y / y_norm
+        return res
+
     def forward(self, x):
         x1 = self.norm1(x)
         #x1 = nonlinearity(x1)
@@ -1691,17 +1687,27 @@ def tempsigmoid(x, k=3.0):
 class weightConstraint(object):
     def __init__(self):
         pass
-    
+
     def __call__(self,module):
         if hasattr(module,'weight'):
             w=module.weight.data
-            #w=tempsigmoid(w)
-            
+            w=tempsigmoid(w)
+            """
             w = torch.heaviside(w, torch.tensor([0.0]))
             x = torch.sum(w, 0)
             x = x.repeat(w.shape[0], 1)
             w = w/x
-            
+            """
+            module.weight.data=w
+
+class weightConstraint1(object):
+    def __init__(self):
+        pass
+    
+    def __call__(self,module):
+        if hasattr(module,'weight'):
+            w=module.weight.data
+            w=tempsigmoid(w)
             module.weight.data=w
 class HierarchyVQmodulator(nn.Module):
 
@@ -1738,17 +1744,21 @@ class HierarchyVQmodulator(nn.Module):
                                       kernel_size=1,
                                       stride=1,
                                       )
+        # ============
 
         self.trim = trim
         self.reasoning = reasoning
         self.combine = combine
+        self.epsilon = 1e-4
+        self.eps = {torch.float32: 4e-3, torch.float64: 1e-5}
+        self.min_norm = 1e-15
 
         if not gumble:
             self.quantize = VectorQuantizer2DHS(device, 
                                     codebooksize[0], 
                                     emb_dim, 
                                     beta=1.0, 
-                                    disentangle=True,
+                                    disentangle=False,
                                     sigma=0.1)
             self.quantize1 = VectorQuantizer2DHS(device, 
                                     codebooksize[1], 
@@ -1802,10 +1812,17 @@ class HierarchyVQmodulator(nn.Module):
         # self.q3w = torch.nn.Parameter(torch.ones(emb_dim))
         
         self.q1w = self.q2w = self.q3w = None
-        self.q1conv = None
-        self.q2conv = None
-        self.q3conv = None
+        self.q1conv = torch.nn.Linear(z_channels,z_channels)
+        self.q2conv = torch.nn.Linear(z_channels, z_channels)
+        self.q3conv = torch.nn.Linear(z_channels, z_channels)
 
+        self.h =  HypLinear(emb_dim, emb_dim, 1, 0, True )
+        #self.h2 =  HypLinear(emb_dim, emb_dim, 1, 0, True )
+        #self.h3 =  HypLinear(emb_dim, emb_dim, 1, 0, True )
+        wc = weightConstraint()
+        self.q1conv.apply(wc)
+        self.q2conv.apply(wc)
+        self.q3conv.apply(wc)
         if self.trim:
             self.q1conv = torch.nn.Conv2d(z_channels,
                                         z_channels//4,
@@ -1830,7 +1847,7 @@ class HierarchyVQmodulator(nn.Module):
                                             kernel_size=1,
                                             stride=1,
                                             )
-        
+        """        
         if self.reasoning:
             self.rattn1 = HypLinear(codebooksize[0],
                                         codebooksize[1], 1, 0, True,
@@ -1845,6 +1862,17 @@ class HierarchyVQmodulator(nn.Module):
             self.rattn1.apply(wc)
             self.rattn2.apply(wc)
             self.rattn3.apply(wc)
+        """
+        if self.reasoning:
+            self.binary1 = BinaryLinear(codebooksize[0],
+                                        codebooksize[1]
+                                        )
+            self.binary2 = BinaryLinear(codebooksize[1],
+                                        codebooksize[2],
+                                     )
+            self.binary3 = BinaryLinear(codebooksize[2],
+                                        codebooksize[3],
+                                        )
         """
         if self.reasoning:
             self.rattn1 = torch.nn.Linear(codebooksize[0],
@@ -1863,12 +1891,85 @@ class HierarchyVQmodulator(nn.Module):
         """
         self.z_channels = z_channels
         self.emb_dim = emb_dim 
+    def binary_parameters(self):
+        for name, layer in self.named_parameters():
+            if "binary" in name:
+                yield layer
 
-    def attention(self, input_,  w, x, conv=None):
+    def non_binary_parameters(self):
+        for name, layer in self.named_parameters():
+            if "bn" in name:
+                yield layer
+    def proj(self, x, c):
+        K = 1. / c
+        d = x.size(-1) - 1
+        y = x.narrow(-1, 1, d)
+        y_sqnorm = torch.norm(y, p=2, dim=1, keepdim=True) ** 2
+        mask = torch.ones_like(x)
+        mask[:, 0] = 0
+        vals = torch.zeros_like(x)
+        vals[:, 0:1] = torch.sqrt(torch.clamp(K + y_sqnorm, min=self.eps[x.dtype]))
+        return vals + mask * x
+
+
+
+    def expmap0(self, u, c):
+        K = 1. / c
+        sqrtK = K ** 0.5
+        d = u.size(-1) - 1
+        x = u.narrow(-1, 1, d).view(-1, d)
+        x_norm = torch.norm(x, p=2, dim=1, keepdim=True)
+        x_norm = torch.clamp(x_norm, min=self.min_norm)
+        theta = x_norm / sqrtK
+        res = torch.ones_like(u)
+        res[:, 0:1] = sqrtK * cosh(theta)
+        res[:, 1:] = sqrtK * sinh(theta) * x / x_norm
+        return self.proj(res, c)
+
+    def logmap0(self, x, c):
+        K = 1. / c
+        sqrtK = K ** 0.5
+        d = x.size(-1) - 1
+        y = x.narrow(-1, 1, d).view(-1, d)
+        y_norm = torch.norm(y, p=2, dim=1, keepdim=True)
+        y_norm = torch.clamp(y_norm, min=self.min_norm)
+        res = torch.zeros_like(x)
+        theta = torch.clamp(x[:, 0:1] / sqrtK, min=1.0 + self.epsilon)
+        res[:, 1:] = sqrtK * arcosh(theta) * y / y_norm
+        return res
+    
+    def dist(self, u, v):
+        sqdist = torch.sum(u ** 2, dim=1,  keepdim=True) + \
+                 torch.sum(v ** 2, dim=1) - 2 * \
+                 torch.einsum('bd,dn->bn', u, rearrange(v, 'n d -> d n'))
+        squnorm = torch.sum(v ** 2, dim=1,   keepdim=True)
+        sqvnorm = torch.sum(u ** 2, dim=1,  keepdim=True)
+        l = torch.einsum('bd,dn->bn', 1 - squnorm, rearrange(1 - sqvnorm, 'n d -> d n')) + self.epsilon
+        #x = 1 + 2 * sqdist / torch.einsum('bd,dn->bn', 1 - squnorm, rearrange(1 - sqvnorm, 'n d -> d n')) + self.epsilon
+        x = 1 + 2 * sqdist/torch.t(l)
+        y =  torch.clamp(x ** 2, min=1.0 + self.epsilon)
+        #x = 1 + 2 * sqdist / torch.mm((1 - squnorm), (1 - sqvnorm)) + self.epsilon
+        z = torch.sqrt(y - 1)
+        return torch.clamp(torch.log(x + z), max =2.5)
+
+
+    def attention(self, input_,  w, y, conv=None, h = None):
         # x = input_ + (w * x.view(-1, self.emb_dim)).view(x.shape)
 
         if not (conv is None):
-            x = conv(x)
+            x = y.view(y.shape[0] * y.shape[1], y.shape[2] * y.shape[3])
+            x =self.expmap0(x, 1)
+            x = h(x)
+            x= self.logmap0(x, 1)
+            x = x.view(y.shape[0], y.shape[1], y.shape[2] * y.shape[3])
+            x = rearrange(x, 'b c h -> b h c').contiguous()
+            x = torch.einsum('bhc, cc-> bhc', x, conv.weight)
+            x = rearrange(x, 'b h c -> b c h').contiguous()
+            #x = x.view(y.shape[0] * y.shape[1], y.shape[2] * y.shape[3])
+            #x= self.logmap0(x, 1)
+            x = x.view(y.shape[0], y.shape[1], y.shape[2], y.shape[3])
+        else:
+            x = y
         return x
 
     def other_parameters(self):
@@ -1897,25 +1998,40 @@ class HierarchyVQmodulator(nn.Module):
         shape = x2.shape
         assert self.emb_dim == shape[2]*shape[3]
 
-        z_q1, loss1, sampled_idx1, ce1, td1, hrc1, r1 = self.quantize(x2)
-        z_q1_attn = self.attention(x2, self.q1w, z_q1, self.q1conv)
+        z_q1, loss1, sampled_idx1, ce1, td1, hrc1, r1, prevcb1, attention_w1, cb_attnp1 = self.quantize(x2)
+        z_q1_attn = self.attention(x2, self.q1w, z_q1, self.q1conv, self.h)
 
-        z_q2, loss2, sampled_idx2, ce2, td2, hrc2, r2 = self.quantize1(z_q1_attn,
+
+        z_q2, loss2, sampled_idx2, ce2, td2, hrc2, r2, prevcb2, attention_w2, cb_attnp2 = self.quantize1(z_q1_attn,
                                                                     self.quantize.embedding.weight,
-                                                                    self.rattn1.weight.T)
-        z_q2_attn = self.attention(z_q1_attn, self.q2w, z_q2, self.q2conv)
-        z_q3, loss3, sampled_idx3, ce3, td3, hrc3, r3 = self.quantize2(z_q2_attn,
+                                                                    #self.rattn1.weight.T)
+                                                                    self.binary1.weight.T)
+        z_q2_attn = self.attention(z_q1_attn, self.q2w, z_q2, self.q2conv, self.h)
+
+        z_q3, loss3, sampled_idx3, ce3, td3, hrc3, r3, prevcb3, attention_w3, cb_attnp3 = self.quantize2(z_q2_attn,
                                                                     self.quantize1.embedding.weight,
-                                                                    self.rattn2.weight.T)
-        z_q3_attn = self.attention(z_q2_attn, self.q3w, z_q3, self.q3conv)
+                                                                    #self.rattn2.weight.T)
+                                                                    self.binary2.weight.T)
+        z_q3_attn = self.attention(z_q2_attn, self.q3w, z_q3, self.q3conv, self.h)
 
 
-        z_q4, loss4, sampled_idx4, ce4, td4, hrc4, r4 = self.quantize3(z_q3_attn,
+        z_q4, loss4, sampled_idx4, ce4, td4, hrc4, r4,  prevcb4, attention_w4, cb_attnp4 = self.quantize3(z_q3_attn,
                                                                     self.quantize2.embedding.weight,
-                                                                    self.rattn3.weight.T)
-
+                                                                    #self.rattn3.weight.T)
+                                                                    self.binary3.weight.T)
 
         # logs
+        attention2 = torch.where(attention_w2 > 0.5, 1,0)
+        attention3 = torch.where(attention_w3 > 0.5, 1,0)
+        attention4 = torch.where(attention_w4 > 0.5, 1,0)
+        pd1 = self.dist(prevcb2, cb_attnp2)
+        pd2 = self.dist(prevcb3, cb_attnp3)
+        pd3 = self.dist(prevcb4, cb_attnp4)
+        pd4 = self.dist(prevcb2, cb_attnp3)
+        pd5 = self.dist(prevcb2, cb_attnp4)
+        pd6 = self.dist(prevcb3, cb_attnp4)
+        ploss = (torch.sum(attention2 * pd1) + torch.sum(attention3 * pd2) + torch.sum(attention4 * pd3))/ \
+        (torch.sum( (1-attention2)*pd1) + torch.sum((1-attention3)*pd2) + torch.sum((1-attention4)*pd3) + torch.sum(pd4) + torch.sum(pd5) +torch.sum(pd6))
         loss = 0.25*(loss1 + loss2 + loss3 + loss4) 
         ce = 0.25*(ce1 + ce2 + ce3 + ce4) 
         td = 0.25*(td1 + td2 + td3 + td4) 
@@ -1935,11 +2051,11 @@ class HierarchyVQmodulator(nn.Module):
             z_q = self.combine_conv(z_combine)
         else:
             z_q = [z_q1, z_q2, z_q3, z_q4]
-        return (loss, 
+        return (loss, ploss,
                     [z_q1, z_q2, z_q3, z_q4],
                     z_q,  
                     [sampled_idx1, sampled_idx2, sampled_idx3, sampled_idx4],
-                    ce, td, hrc, r)
+                    ce, td, hrc, r, [attention2, attention3, attention4], [prevcb2, prevcb3, prevcb4, cb_attnp4])
 
 class VectorQuantizer2DHB(nn.Module):
     """
@@ -1994,13 +2110,11 @@ class VectorQuantizer2DHB(nn.Module):
         u_norm = torch.clamp_min(u.norm(dim=1, p=2, keepdim=True), self.min_norm)
         gamma_1 = tanh(sqrt_c * u_norm) * u / (sqrt_c * u_norm)
         return gamma_1
-
     def logmap0(self, p, c):
         sqrt_c = c ** 0.5
         p_norm = p.norm(dim=1, p=2, keepdim=True).clamp_min(self.min_norm)
         scale = 1. / sqrt_c * artanh(sqrt_c * p_norm) / p_norm
         return scale * p
-
     def proj(self, x, c):
         norm = torch.clamp_min(x.norm(dim=-1, keepdim=True, p=2), self.min_norm)
         maxnorm = (1 - self.eps[x.dtype]) / (c ** 0.5)
@@ -2427,10 +2541,8 @@ class HypLinear(nn.Module):
         cond = norm > maxnorm
         projected = x / norm * maxnorm
         return torch.where(cond, projected, x)
-
     def proj_tan0(self, u, c):
         return u
-
     def mobius_add(self, x, y, c, dim=-1):
         x2 = x.pow(2).sum(dim=dim, keepdim=True)
         y2 = y.pow(2).sum(dim=dim, keepdim=True)
@@ -2438,14 +2550,11 @@ class HypLinear(nn.Module):
         num = (1 + 2 * c * xy + c * y2) * x + (1 - c * x2) * y
         denom = 1 + 2 * c * xy + c ** 2 * x2 * y2
         return num / denom.clamp_min(self.min_norm)
-
     def expmap0(self, u, c):
         sqrt_c = c ** 0.5
         u_norm = torch.clamp_min(u.norm(dim=-1, p=2, keepdim=True), self.min_norm)
         gamma_1 = tanh(sqrt_c * u_norm) * u / (sqrt_c * u_norm)
         return gamma_1
-
-
     def mobius_matvec(self, m, x, c):
         sqrt_c = c ** 0.5
         x_norm = x.norm(dim=-1, keepdim=True, p=2).clamp_min(self.min_norm)
@@ -2593,7 +2702,7 @@ class HypAct(nn.Module):
         self.act = nn.ReLU()
         self.min_norm = 1e-15
         self.eps = {torch.float32: 4e-3, torch.float64: 1e-5}
-    """
+    
     def expmap0(self, u, c):
         K = 1. / c
         sqrtK = K ** 0.5
@@ -2606,7 +2715,6 @@ class HypAct(nn.Module):
         res[:, 0:1] = sqrtK * cosh(theta)
         res[:, 1:] = sqrtK * sinh(theta) * x / x_norm
         return self.proj(res, c)
-
     def logmap0(self, x, c):
         K = 1. / c
         sqrtK = K ** 0.5
@@ -2628,7 +2736,6 @@ class HypAct(nn.Module):
         vals = torch.zeros_like(x)
         vals[:, 0:1] = torch.sqrt(torch.clamp(K + y_sqnorm, min=self.eps[x.dtype]))
         return vals + mask * x
-
     def proj_tan(self, u, x, c):
         K = 1. / c
         d = x.size(1) - 1
@@ -2638,13 +2745,11 @@ class HypAct(nn.Module):
         vals = torch.zeros_like(u)
         vals[:, 0:1] = ux / torch.clamp(x[:, 0:1], min=self.eps[x.dtype])
         return vals + mask * u
-
     def proj_tan0(self, u, c):
         narrowed = u.narrow(-1, 0, 1)
         vals = torch.zeros_like(u)
         vals[:, 0:1] = narrowed
         return u - vals
-
     """
     def expmap0(self, u, c):
         sqrt_c = c ** 0.5
@@ -2671,7 +2776,7 @@ class HypAct(nn.Module):
 
     def proj_tan0(self, u, c):
         return u
-    
+    """
 
 
     def forward(self, x):
@@ -2783,7 +2888,6 @@ class HierarchyVQhb(nn.Module):
         m = torch.flatten(minenc4, start_dim=1)
         pred = F.one_hot(torch.mode(m, dim = 1)[0], num_classes=self.nclasses)
         output = torch.zeros(self.nclasses, minenc4.shape[0], minenc4.shape[1],minenc4.shape[2]).to(self.device)
-
         l = torch.ones(1, minenc4.shape[0], minenc4.shape[1],minenc4.shape[2]).to(self.device)
         m = torch.unsqueeze(minenc4, dim=0)
         output = output.scatter_(0, m, l)

@@ -21,7 +21,7 @@
     "pl_weightage": 1.0,
     "seed": 42,
     "nclasses": 10,
-    "latent_dim": 16,
+    "latent_dim": 32,
     "log": true,
     "ch": 32,
     "out_ch": 3,

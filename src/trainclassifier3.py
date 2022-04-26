@@ -178,7 +178,7 @@ class Trainer():
           #              lr=self.lr)
 
         self.opt = MomentumWithThresholdBinaryOptimizer(
-                         list(self.modelclass.binary_parameters()),
+                         self.modelclass.binary_parameters(),
                          list(self.classifier_quantized.parameters()) + list(self.modelclass.non_binary_parameters()),
                          ar=0.001,
                          threshold=0.5,
@@ -331,7 +331,7 @@ class Trainer():
                 conti_target = m(self.classifier_baseline(features1))
                 conti_target = torch.argmax(conti_target, 1)
 
-            wc = weightConstraint()
+           # wc = weightConstraint()
             #self.modelclass.rattn1.apply(wc)
             #self.modelclass.rattn2.apply(wc)
             #self.modelclass.rattn3.apply(wc)

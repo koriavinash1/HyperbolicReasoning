@@ -11,7 +11,6 @@ from torch.optim import Adam
 from collections import OrderedDict
 
 
-################################################################################
 
 # taken from https://github.com/pytorch/pytorch/blob/bfeff1eb8f90aa1ff7e4f6bafe9945ad409e2d97/torch/nn/common_types.pyi
 
@@ -19,7 +18,6 @@ T = TypeVar("T")
 _scalar_or_tuple_2_t = Union[T, Tuple[T, T]]
 _size_2_t = _scalar_or_tuple_2_t[int]
 
-################################################################################
 # Quantizers
 
 
@@ -49,7 +47,6 @@ class Binarize(Function):
 
 binarize = Binarize.apply
 
-################################################################################
 # Optimizers for binary networks
 
 class MomentumWithThresholdBinaryOptimizer(Optimizer):
@@ -97,7 +94,7 @@ class MomentumWithThresholdBinaryOptimizer(Optimizer):
                 y = ar
 
             for param_idx, p in enumerate(params):
-                print (p, p.grad)
+#                print (p, p.grad)
                 grad = p.grad.data
                 state = self.state[p]
 
@@ -124,7 +121,6 @@ class MomentumWithThresholdBinaryOptimizer(Optimizer):
         self._adam.zero_grad()
 
 
-################################################################################
 # binary torch layers
 
 
@@ -329,8 +325,6 @@ class Reasoning(nn.Module):
 
         loss = ce_loss + be_loss
         return y_, loss
-<<<<<<< HEAD
-=======
  
 
 
@@ -368,7 +362,6 @@ class ReasoningModel(nn.Module):
         return outputs
         
 
->>>>>>> 34316afb85e9df3bb5fba9a420c640f0f2781819
  
 
 
