@@ -62,8 +62,19 @@ class weightConstraint(object):
     def __call__(self,module):
         if hasattr(module,'weight'):
             w=module.weight.data
-            w[w>0.5] = 1
-            w[w<0.5] = 0
+            w[w>0.01] = 1
+            w[w<0.01] = 0
+            module.weight.data=w
+
+class weightConstraint2(object):
+    def __init__(self):
+        pass
+
+    def __call__(self,module):
+        if hasattr(module,'weight'):
+            w=module.weight.data
+            x = w.shape[1]
+            w = w/x
             module.weight.data=w
 
 class Trainer():
@@ -173,17 +184,19 @@ class Trainer():
 
 
         # Optimizers
-        #self.opt = Adam(list(self.modelclass.parameters()) + \
-         #               list(self.classifier_quantized.parameters()),
-          #              lr=self.lr)
-
-        self.opt = MomentumWithThresholdBinaryOptimizer(
-                         self.modelclass.binary_parameters(),
-                         list(self.classifier_quantized.parameters()) + list(self.modelclass.non_binary_parameters()),
+        
+        self.opt = Adam(list(self.modelclass.other_parameters()) + \
+                        list(self.classifier_quantized.parameters()),
+                        lr=self.lr)
+            
+        self.opt1 = MomentumWithThresholdBinaryOptimizer(
+                         list(self.modelclass.reasoning_parameters()),
+                         list(self.classifier_quantized.parameters()) + list(self.modelclass.other_parameters()),
                          ar=0.001,
                          threshold=0.5,
                          adam_lr=self.lr,
                      )
+        
         self.LR_sch = ReduceLROnPlateau(self.opt, patience=2)
 
 
@@ -250,7 +263,7 @@ class Trainer():
             m = nn.Softmax(dim=1)
 
             self.opt.zero_grad()
-            #self.opt1.zero_grad()
+            self.opt1.zero_grad()
             self.opt2.zero_grad()
 
 
@@ -278,12 +291,12 @@ class Trainer():
 
             loss = class_loss_ +  quant_loss + ploss #quant_loss = quant_loss + cb_disentanglement_loss
             loss.backward()
-
             # print (torch.mean(self.modelclass.rattn3.weight.grad), torch.std(self.modelclass.rattn3.weight.grad))
             #self.opt1.step()            
             self.opt.step()
-            #self.opt1.step()
-            #wc = weightConstraint1()
+            self.opt1.step()
+            print (self.modelclass.rattn3.weight)
+            wc = weightConstraint()
             #self.modelclass.rattn1.apply(wc)
             #self.modelclass.rattn2.apply(wc)
             #self.modelclass.rattn3.apply(wc)
@@ -296,7 +309,8 @@ class Trainer():
             with torch.no_grad():
                  self.modelclass.quantize.r.clamp_(0.9, 1.1)
 
-            self.training_widgets[0] = progressbar.FormatLabel(
+            #self.training_widgets[0] = progressbar.FormatLabel(
+            print(
                                 f" tepoch:%.1f" % epoch +
                                 f" tcloss:%.4f" % class_loss_ +
                                 f" poincareloss:%.4f" % ploss +
@@ -308,7 +322,7 @@ class Trainer():
                                 f" t<cb variance>:%.4f" % ce +
                                 f" ttloss:%.4f" % loss
                             )
-            self.training_pbar.update(batch_idx)
+            #self.training_pbar.update(batch_idx)
         pass
 
 
@@ -331,7 +345,7 @@ class Trainer():
                 conti_target = m(self.classifier_baseline(features1))
                 conti_target = torch.argmax(conti_target, 1)
 
-           # wc = weightConstraint()
+            #wc = weightConstraint()
             #self.modelclass.rattn1.apply(wc)
             #self.modelclass.rattn2.apply(wc)
             #self.modelclass.rattn3.apply(wc)
@@ -383,7 +397,8 @@ class Trainer():
             mean_f1_score.append(f1_)
             mean_acc_score.append(acc)
 
-            self.validation_widgets[0] = progressbar.FormatLabel(
+            #self.validation_widgets[0] = progressbar.FormatLabel(
+            print(                    
                                 f" vepoch:%.1f" % epoch +
                                 f" vrcnloss:%.4f" % recon_loss_ +
                                 f" vhsploss:%.4f" % hrc + 
@@ -395,7 +410,7 @@ class Trainer():
                                 f" vF1:%.4f" % f1_ +
                                 f" vAcc:%.4f" % acc 
                             )
-            self.validation_pbar.update(batch_idx)
+            #self.validation_pbar.update(batch_idx)
 
         return (np.mean(mean_loss), 
                     np.mean(mean_recon_loss_), 
@@ -422,20 +437,29 @@ class Trainer():
             self.training_step(train_loader, iepoch)
             loss, rloss, f1, acc, attnblocks, codebooks= self.validation_step(valid_loader, iepoch)
 
-            if iepoch==35:
+            if iepoch==5:
                 for i in range(len(attnblocks)):
                     att = attnblocks[i].cpu().numpy()
                     cb1 = codebooks[i].cpu().numpy()
                     cb2 = codebooks[i+1].cpu().numpy()
                     for j in range(cb1.shape[0]):
                         for k in range(cb2.shape[0]):
+                            point1 = cb1[j]
+                            point2 = cb2[k]
+                            x1 = [point1[0]]
+                            x2 = [point2[0]]
+                            y1 = [point1[1]]
+                            y2 = [point2[1]]
                             if att[j,k] == 1:
-                                plt.plot(cb1[j], cb2[k] , 'ro-')
-                            else:
-                                plt.plot(cb1[j])
-                                plt.plot(cb2[k])
+                                if i == 0:
+                                   plt.plot(x1, y1, 'ro')
+                                   plt.plot(x2, y2, 'bs')
+                                elif i == 1:
+                                   plt.plot(x2, y2, 'g^')
+                                    #               else:
+              #                  plt.plot(x, y)
 
-            plt.savefig('/vol/biomedic3/as217/GeometricSymbolicAI/SymbolicInterpretability/SymbolicInterpretability/src/images/poincaree.png')
+            plt.savefig('/vol/biomedic3/as217/GeometricSymbolicAI/SymbolicInterpretability/SymbolicInterpretability/src/images/poincaretest2.png')
                   
 
             stats = {'loss': loss, 'f1': f1, 'acc': acc, 'rloss': rloss}
@@ -583,4 +607,5 @@ def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNI
     trainer = Trainer(**model_args)
     trainer.train()
 
-
+if __name__ == '__main__':
+    fire.Fire(train_from_folder)

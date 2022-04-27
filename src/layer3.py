@@ -1024,7 +1024,8 @@ class VectorQuantizer2DHS(nn.Module):
         # reshape z -> (batch, height, width, channel) and flatten
         # z = rearrange(z, 'b c h w -> b h w c').contiguous()
         z_flattened = z.view(-1, self.e_dim)
-        
+        z_flattened = torch.nn.functional.normalize(z_flattened)
+        z = z_flattened.view(z.shape) 
 
         # intra distance (gdes-distance) between codebook vector 
         d1 = torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
@@ -1047,7 +1048,6 @@ class VectorQuantizer2DHS(nn.Module):
         codebookvariance = torch.mean(torch.var(d1, 1))
         # codebookvariance = torch.var(min_distance[0])
 
-
         # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
         d = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + \
             torch.sum(self.embedding.weight**2, dim=1) - 2 * \
@@ -1060,6 +1060,7 @@ class VectorQuantizer2DHS(nn.Module):
 
         # get quantized vector and normalize
         z_q = self.embedding(min_encoding_indices).view(z.shape)
+        loss = 0
         cb_loss = 0
         prevcb=  cb_attnp = None
                 
@@ -1069,10 +1070,15 @@ class VectorQuantizer2DHS(nn.Module):
                                     self.logmap0(self.h(self.expmap0(prev_cb.clone().detach(), 1)),1), 
                                     attention_w)
             #cb_attn = self.logmap0(cb_attn, 1)
+            d1 = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + \
+            torch.sum(cb_attn**2, dim=1) - 2 * \
+            torch.einsum('bd,dn->bn', z_flattened, rearrange(cb_attn, 'n d -> d n'))
+            min_encoding_indices1 = torch.argmin(d1, dim=1)
             cb_attnp = self.to_poincare(self.h1(self.expmap0(cb_attn, 1)), 1)
-            z_q2 = cb_attn[min_encoding_indices].view(z.shape)
+            z_q2 = cb_attn[min_encoding_indices1].view(z.shape)
             cb_loss = F.mse_loss(z_q, z_q2)
-        
+        else:
+            z_q2 = z_q
         """
         if not (prev_cb is None):
             cb_attn = torch.einsum('md,mn->nd',
@@ -1087,23 +1093,23 @@ class VectorQuantizer2DHS(nn.Module):
 
         perplexity = None
         min_encodings = None
-        self.r = self.clamp_class.apply(self.r)
+        #self.r = self.clamp_class.apply(self.r)
         # compute loss for embedding
-         
-        if not self.legacy:
-            loss = self.beta * torch.mean((z_q.detach() - z) ** 2) 
-            if not self.ignorezq:
-                loss += torch.mean((z_q - z.detach()) ** 2) 
-        else:
-            loss = torch.mean((z_q.detach() - z) ** 2)  
-            if not self.ignorezq:
-                loss += self.beta * torch.mean((z_q - z.detach()) ** 2)
+        if  (prev_cb is None):
+            if not self.legacy:
+                loss = self.beta * torch.mean((z_q.detach() - z) ** 2) 
+                if not self.ignorezq:
+                    loss += torch.mean((z_q - z.detach()) ** 2) 
+            else:
+                loss = torch.mean((z_q.detach() - z) ** 2)  
+                if not self.ignorezq:
+                    loss += self.beta * torch.mean((z_q - z.detach()) ** 2)
 
-        loss += cb_loss
-        disentanglement_loss = codebookvariance - total_min_distance
-        if self.disentangle:
-            loss += hsw
-            loss += disentanglement_loss
+            #loss += cb_loss
+            disentanglement_loss = codebookvariance - total_min_distance
+            if self.disentangle:
+                loss += hsw
+                loss += disentanglement_loss
 
         """
         if not self.legacy:
@@ -1114,7 +1120,7 @@ class VectorQuantizer2DHS(nn.Module):
 
         # preserve gradients
         z_q = z + (z_q - z).detach()
-
+        z_q2 = z + (z_q2 - z).detach()
         # reshape back to match original input shape
         # z_q = rearrange(z_q, 'b h w c-> b c h w').contiguous()
 
@@ -1132,7 +1138,7 @@ class VectorQuantizer2DHS(nn.Module):
         sampled_idx = torch.zeros(z.shape[0]*self.n_e).to(z.device)
         sampled_idx[min_encoding_indices] = 1
         sampled_idx = sampled_idx.view(z.shape[0], self.n_e)
-        return (z_q, loss,
+        return (z_q2, loss,
                     (sampled_idx, min_encoding_indices), 
                     codebookvariance, 
                     total_min_distance,  
@@ -1812,14 +1818,19 @@ class HierarchyVQmodulator(nn.Module):
         # self.q3w = torch.nn.Parameter(torch.ones(emb_dim))
         
         self.q1w = self.q2w = self.q3w = None
+        """
         self.q1conv = torch.nn.Linear(z_channels,z_channels)
         self.q2conv = torch.nn.Linear(z_channels, z_channels)
         self.q3conv = torch.nn.Linear(z_channels, z_channels)
-
+        """
+        self.q1conv = BinaryLinear(z_channels,z_channels)
+        self.q2conv = BinaryLinear(z_channels, z_channels)
+        self.q3conv = BinaryLinear(z_channels, z_channels)
+        
         self.h =  HypLinear(emb_dim, emb_dim, 1, 0, True )
-        #self.h2 =  HypLinear(emb_dim, emb_dim, 1, 0, True )
+        self.h2 =  HypLinear(emb_dim, emb_dim, 1, 0, True )
         #self.h3 =  HypLinear(emb_dim, emb_dim, 1, 0, True )
-        wc = weightConstraint()
+        wc = weightConstraint1()
         self.q1conv.apply(wc)
         self.q2conv.apply(wc)
         self.q3conv.apply(wc)
@@ -1858,21 +1869,24 @@ class HierarchyVQmodulator(nn.Module):
             self.rattn3 = HypLinear(codebooksize[2],
                                         codebooksize[3], 1, 0, True,
                                         )
-            wc = weightConstraint()
+            wc = weightConstraint1()
             self.rattn1.apply(wc)
             self.rattn2.apply(wc)
             self.rattn3.apply(wc)
         """
+        
         if self.reasoning:
-            self.binary1 = BinaryLinear(codebooksize[0],
-                                        codebooksize[1]
-                                        )
-            self.binary2 = BinaryLinear(codebooksize[1],
+            #self.rattn1 = BinaryLinear(codebooksize[0],
+             #                           codebooksize[1]
+              #                          )
+            self.rattn2 = BinaryLinear(codebooksize[0],
                                         codebooksize[2],
                                      )
-            self.binary3 = BinaryLinear(codebooksize[2],
+            self.rattn3 = BinaryLinear(codebooksize[2],
                                         codebooksize[3],
                                         )
+        
+        
         """
         if self.reasoning:
             self.rattn1 = torch.nn.Linear(codebooksize[0],
@@ -1950,7 +1964,7 @@ class HierarchyVQmodulator(nn.Module):
         y =  torch.clamp(x ** 2, min=1.0 + self.epsilon)
         #x = 1 + 2 * sqdist / torch.mm((1 - squnorm), (1 - sqvnorm)) + self.epsilon
         z = torch.sqrt(y - 1)
-        return torch.clamp(torch.log(x + z), max =2.5)
+        return torch.log(x + z)
 
 
     def attention(self, input_,  w, y, conv=None, h = None):
@@ -1974,12 +1988,12 @@ class HierarchyVQmodulator(nn.Module):
 
     def other_parameters(self):
         for name, layer in self.named_parameters():
-            if not ("ratt" in name.lower()):
+            if not ("rattn" in name.lower()):
                 yield layer
 
     def reasoning_parameters(self):
         for name, layer in self.named_parameters():
-            if "ratt" in name.lower():
+            if "rattn" in name.lower():
                 yield layer
 
     def reasoning_attn(self, cb, w):
@@ -2000,44 +2014,61 @@ class HierarchyVQmodulator(nn.Module):
 
         z_q1, loss1, sampled_idx1, ce1, td1, hrc1, r1, prevcb1, attention_w1, cb_attnp1 = self.quantize(x2)
         z_q1_attn = self.attention(x2, self.q1w, z_q1, self.q1conv, self.h)
-
-
+        #z_q1_attn = self.attention(x2, self.q1w, z_q1, self.binaryc1, self.h)
+        """
         z_q2, loss2, sampled_idx2, ce2, td2, hrc2, r2, prevcb2, attention_w2, cb_attnp2 = self.quantize1(z_q1_attn,
                                                                     self.quantize.embedding.weight,
-                                                                    #self.rattn1.weight.T)
-                                                                    self.binary1.weight.T)
+                                                                    self.rattn1.weight.T)
+                                                                    #self.binary1.weight.T)
         z_q2_attn = self.attention(z_q1_attn, self.q2w, z_q2, self.q2conv, self.h)
-
-        z_q3, loss3, sampled_idx3, ce3, td3, hrc3, r3, prevcb3, attention_w3, cb_attnp3 = self.quantize2(z_q2_attn,
-                                                                    self.quantize1.embedding.weight,
-                                                                    #self.rattn2.weight.T)
-                                                                    self.binary2.weight.T)
-        z_q3_attn = self.attention(z_q2_attn, self.q3w, z_q3, self.q3conv, self.h)
+        """
+        #z_q2_attn = self.attention(z_q1_attn, self.q2w, z_q2, self.binaryc2, self.h)
+        z_q3, loss3, sampled_idx3, ce3, td3, hrc3, r3, prevcb3, attention_w3, cb_attnp3 = self.quantize2(z_q1_attn,
+                                                                    self.quantize.embedding.weight,
+                                                                    self.rattn2.weight.T)
+                                                                    #self.binary2.weight.T)
+        z_q3_attn = self.attention(z_q1_attn, self.q3w, z_q3, self.q3conv, self.h2)
+        #z_q3_attn = self.attention(z_q2_attn, self.q3w, z_q3, self.binaryc3, self.h)
 
 
         z_q4, loss4, sampled_idx4, ce4, td4, hrc4, r4,  prevcb4, attention_w4, cb_attnp4 = self.quantize3(z_q3_attn,
                                                                     self.quantize2.embedding.weight,
-                                                                    #self.rattn3.weight.T)
-                                                                    self.binary3.weight.T)
+                                                                    self.rattn3.weight.T)
+                                                                    #self.binary3.weight.T)
 
         # logs
-        attention2 = torch.where(attention_w2 > 0.5, 1,0)
-        attention3 = torch.where(attention_w3 > 0.5, 1,0)
-        attention4 = torch.where(attention_w4 > 0.5, 1,0)
-        pd1 = self.dist(prevcb2, cb_attnp2)
+        #attention2 = torch.where(attention_w2 > 0.5, 1,0)
+        attention3 = torch.where(attention_w3 > 0.0, 1,0)
+        attention4 = torch.where(attention_w4 > 0.0, 1,0)
+        #attention2b = torch.where(attention_w2 > 0.5, 0,1)
+        attention3b = torch.where(attention_w3 > 0.0, 0,1)
+        attention4b = torch.where(attention_w4 > 0.0, 0,1)
+        #pd1 = self.dist(prevcb2, cb_attnp2)
         pd2 = self.dist(prevcb3, cb_attnp3)
         pd3 = self.dist(prevcb4, cb_attnp4)
-        pd4 = self.dist(prevcb2, cb_attnp3)
-        pd5 = self.dist(prevcb2, cb_attnp4)
+        #pd4 = self.dist(prevcb2, cb_attnp3)
+        #pd5 = self.dist(prevcb2, cb_attnp4)
         pd6 = self.dist(prevcb3, cb_attnp4)
-        ploss = (torch.sum(attention2 * pd1) + torch.sum(attention3 * pd2) + torch.sum(attention4 * pd3))/ \
-        (torch.sum( (1-attention2)*pd1) + torch.sum((1-attention3)*pd2) + torch.sum((1-attention4)*pd3) + torch.sum(pd4) + torch.sum(pd5) +torch.sum(pd6))
-        loss = 0.25*(loss1 + loss2 + loss3 + loss4) 
-        ce = 0.25*(ce1 + ce2 + ce3 + ce4) 
-        td = 0.25*(td1 + td2 + td3 + td4) 
-        hrc = 0.25*(hrc1 + hrc2 + hrc3 + hrc4) 
-        r = 0.25*(r1 + r2 + r3 + r4)
-
+        pd1s = self.dist(prevcb3, prevcb3)
+        pd2s = self.dist(prevcb4, prevcb4)
+        pd3s = self.dist(cb_attnp4, cb_attnp4)
+        #ploss = (torch.sum(attention2 * pd1) + torch.sum(attention3 * pd2) + torch.sum(attention4 * pd3))/ \
+        #(torch.sum( (attention2b)*pd1) + torch.sum((attention3b)*pd2) + torch.sum((attention4b)*pd3) + torch.sum(pd4) + torch.sum(pd5) +torch.sum(pd6))
+        ploss =  (torch.sum(attention3 * pd2) + torch.sum(attention4 * pd3))/ \
+        ( torch.sum((attention3b)*pd2) + torch.sum((attention4b)*pd3)  +torch.sum(pd6)+ torch.sum(pd1s) + torch.sum(pd2s) + +torch.sum(pd3s))
+        #print(attention3)
+        #(torch.sum( (1-attention2)*pd1) + torch.sum((1-attention3)*pd2) + torch.sum((1-attention4)*pd3) + torch.sum(pd4) + torch.sum(pd5) +torch.sum(pd6))
+        #(torch.sum( (attention2b)*pd1) + torch.sum((attention3b)*pd2) + torch.sum((attention4b)*pd3) + torch.sum(pd4) + torch.sum(pd5) +torch.sum(pd6))
+        #loss = 0.25*(loss1 + loss2 + loss3 + loss4) 
+        #ce = 0.25*(ce1 + ce2 + ce3 + ce4) 
+        #td = 0.25*(td1 + td2 + td3 + td4) 
+        #hrc = 0.25*(hrc1 + hrc2 + hrc3 + hrc4) 
+        #r = 0.25*(r1 + r2 + r3 + r4)
+        loss = 0.33*(loss1 +  loss3 + loss4)
+        ce = 0.33*(ce1 +  ce3 + ce4)
+        td = 0.33*(td1 + td3 + td4)
+        hrc = 0.33*(hrc1 +  hrc3 + hrc4)
+        r = 0.33*(r1+ r3 + r4)
         # import pdb; pdb.set_trace()
         # print(list(self.reasoning_parameters()))
 
@@ -2047,15 +2078,15 @@ class HierarchyVQmodulator(nn.Module):
         # loss += l1_regularization
 
         if self.trim and self.combine:
-            z_combine = torch.cat([z_q1, z_q2, z_q3, z_q4], dim=1)
+            z_combine = torch.cat([z_q1, z_q3, z_q4], dim=1)
             z_q = self.combine_conv(z_combine)
         else:
-            z_q = [z_q1, z_q2, z_q3, z_q4]
+            z_q = [z_q1,  z_q3, z_q4]
         return (loss, ploss,
-                    [z_q1, z_q2, z_q3, z_q4],
+                    [z_q1,  z_q3, z_q4],
                     z_q,  
-                    [sampled_idx1, sampled_idx2, sampled_idx3, sampled_idx4],
-                    ce, td, hrc, r, [attention2, attention3, attention4], [prevcb2, prevcb3, prevcb4, cb_attnp4])
+                    [sampled_idx1,  sampled_idx3, sampled_idx4],
+                    ce, td, hrc, r, [ attention3, attention4], [prevcb3, prevcb4, cb_attnp4])
 
 class VectorQuantizer2DHB(nn.Module):
     """
