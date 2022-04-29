@@ -192,8 +192,8 @@ class Trainer():
         self.opt1 = MomentumWithThresholdBinaryOptimizer(
                          list(self.modelclass.reasoning_parameters()),
                          list(self.classifier_quantized.parameters()) + list(self.modelclass.other_parameters()),
-                         ar=0.001,
-                         threshold=0.5,
+                         ar=0.0001,
+                         threshold=1e-8,
                          adam_lr=self.lr,
                      )
         
@@ -295,8 +295,9 @@ class Trainer():
             #self.opt1.step()            
             self.opt.step()
             self.opt1.step()
-            print (self.modelclass.rattn3.weight)
-            wc = weightConstraint()
+            #print (self.modelclass.rattn3.weight)
+            #print (self.modelclass.rattn2.weight)
+            #wc = weightConstraint()
             #self.modelclass.rattn1.apply(wc)
             #self.modelclass.rattn2.apply(wc)
             #self.modelclass.rattn3.apply(wc)
@@ -437,7 +438,7 @@ class Trainer():
             self.training_step(train_loader, iepoch)
             loss, rloss, f1, acc, attnblocks, codebooks= self.validation_step(valid_loader, iepoch)
 
-            if iepoch==5:
+            if iepoch==0:
                 for i in range(len(attnblocks)):
                     att = attnblocks[i].cpu().numpy()
                     cb1 = codebooks[i].cpu().numpy()
@@ -459,7 +460,7 @@ class Trainer():
                                     #               else:
               #                  plt.plot(x, y)
 
-            plt.savefig('/vol/biomedic3/as217/GeometricSymbolicAI/SymbolicInterpretability/SymbolicInterpretability/src/images/poincaretest2.png')
+            plt.savefig('/vol/biomedic3/as217/GeometricSymbolicAI/SymbolicInterpretability/SymbolicInterpretability/src/images/poincaretesthack2.png')
                   
 
             stats = {'loss': loss, 'f1': f1, 'acc': acc, 'rloss': rloss}
@@ -520,7 +521,7 @@ def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNI
                       style_depth=16,
                       batch_size=50,
                       nepochs=50,
-                      learning_rate=2e-4,
+                      learning_rate=2e-3,
                       num_workers=None,
                       save_every=1000,
                       aug_prob=0.,

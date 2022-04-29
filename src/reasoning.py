@@ -20,7 +20,7 @@ _size_2_t = _scalar_or_tuple_2_t[int]
 
 # Quantizers
 
-
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class Binarize(Function):
     clip_value = 1
 
@@ -94,7 +94,7 @@ class MomentumWithThresholdBinaryOptimizer(Optimizer):
                 y = ar
 
             for param_idx, p in enumerate(params):
-#                print (p, p.grad)
+                #print (p, p.grad)
                 grad = p.grad.data
                 state = self.state[p]
 
@@ -108,12 +108,19 @@ class MomentumWithThresholdBinaryOptimizer(Optimizer):
 
                 mask = (m.abs() >= t) * (m.sign() == p.sign())
                 mask = mask.double() * -1
-                mask[mask == 0] = 1
-
+                mask[mask == 0] =0
+               # mask[mask == -1] = 0
                 flips[param_idx] = (mask == -1).sum().item()
-
-                p.data.mul_(mask)
-
+                #p.data = (p.data + mask)**2
+                #p.data =torch.heaviside(p.data, torch.tensor([0.0]).to(device))
+                #x[x>0] = 1
+                q = torch.sum(p.data, 0)
+                q = q.repeat(p.data.shape[0], 1)
+                q[q==0] = 1
+                #p.data = x 
+                p.data.add_(mask)
+                p.data.abs_()
+               # p.data.div_(2)
         return flips
 
     def zero_grad(self) -> None:
@@ -209,9 +216,9 @@ class weightConstraint(object):
 class Reasoning(nn.Module):
     def __init__(self, 
             layers= [],
-            ar = 1e-1,
+            ar = 1e-4,
             lr = 1e-3,
-            threshold = 0.5):
+            threshold = 1e-8):
         super(Reasoning, self).__init__()
 
         self.ar = ar

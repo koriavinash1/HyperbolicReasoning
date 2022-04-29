@@ -830,14 +830,14 @@ class VectorQuantizer2DHS(nn.Module):
         self.embedding = nn.Embedding(self.n_e, 
                                             self.e_dim)
 
-        self.h =  HypLinear(e_dim, e_dim, 1, 0, True)
-        self.h1 =  HypLinear(e_dim, 3, 1, 0, True)        
+        self.h =  HNNLayer(e_dim, e_dim, 1, 0, True)
+        #self.h1 =  HypLinear(e_dim, 3, 1, 0, True)        
 
 
         points_in_manifold = torch.Tensor(sphere.random_uniform(n_samples=self.n_e))
-        self.embedding.weight.data.copy_(points_in_manifold).requires_grad=True
+        #self.embedding.weight.data.copy_(points_in_manifold).requires_grad=True
 
-        #self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
+        self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
 
 
         self.hsreg = lambda x: [ torch.norm(x[i]) for i in range(x.shape[0])]
@@ -1020,52 +1020,54 @@ class VectorQuantizer2DHS(nn.Module):
         assert temp is None or temp==1.0, "Only for interface compatible with Gumbel"
         assert rescale_logits==False, "Only for interface compatible with Gumbel"
         assert return_logits==False, "Only for interface compatible with Gumbel"
-        
+        z_flattened = z.view(-1, self.e_dim)
+       # z_flattened = torch.nn.functional.normalize(z_flattened)
+        #z = z_flattened.view(z.shape)
+        if (prev_cb is None):       
         # reshape z -> (batch, height, width, channel) and flatten
         # z = rearrange(z, 'b c h w -> b h w c').contiguous()
-        z_flattened = z.view(-1, self.e_dim)
-        z_flattened = torch.nn.functional.normalize(z_flattened)
-        z = z_flattened.view(z.shape) 
 
-        # intra distance (gdes-distance) between codebook vector 
-        d1 = torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
-        ed1 = torch.tensor(self.ed(self.embedding.weight))
-        ed1 = ed1.repeat(self.n_e, 1)
-        ed2 = ed1.transpose(0,1)
-        ed3 = ed1 * ed2
-        edx = d1/ed3.to(self.device)
-        edx = torch.clamp(edx, min=-0.99999, max=0.99999)
-        # d = torch.acos(d)
-        d1 = torch.acos(edx)
-        
+            # intra distance (gdes-distance) between codebook vector 
+            d1 = torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
+            ed1 = torch.tensor(self.ed(self.embedding.weight))
+            ed1 = ed1.repeat(self.n_e, 1)
+            ed2 = ed1.transpose(0,1)
+            ed3 = ed1 * ed2
+            edx = d1/ed3.to(self.device)
+            edx = torch.clamp(edx, min=-0.99999, max=0.99999)
+            # d = torch.acos(d)
+            d1 = torch.acos(edx)
+            
 
-        # d1 = torch.sum(self.embedding.weight ** 2, dim=1, keepdim=True) + \
-        #      torch.sum(self.embedding.weight ** 2, dim=1) - 2 * \
-        #      torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
-        
-        min_distance = torch.kthvalue(d1, 2, 0)
-        total_min_distance = torch.mean(min_distance[0])
-        codebookvariance = torch.mean(torch.var(d1, 1))
-        # codebookvariance = torch.var(min_distance[0])
+            # d1 = torch.sum(self.embedding.weight ** 2, dim=1, keepdim=True) + \
+            #      torch.sum(self.embedding.weight ** 2, dim=1) - 2 * \
+            #      torch.einsum('bd,dn->bn', self.embedding.weight, rearrange(self.embedding.weight, 'n d -> d n'))
+            
+            min_distance = torch.kthvalue(d1, 2, 0)
+            total_min_distance = torch.mean(min_distance[0])
+            codebookvariance = torch.mean(torch.var(d1, 1))
+            # codebookvariance = torch.var(min_distance[0])
 
-        # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
-        d = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + \
-            torch.sum(self.embedding.weight**2, dim=1) - 2 * \
-            torch.einsum('bd,dn->bn', z_flattened, rearrange(self.embedding.weight, 'n d -> d n'))
-        
-        min_encoding_indices = torch.argmin(d, dim=1)
-        # distances = d[range(d.shape[0]), min_encoding_indices].view(z.shape[0], z.shape[1])
-        # distances = self.rbf(distances)
+            # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
+            d = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + \
+                torch.sum(self.embedding.weight**2, dim=1) - 2 * \
+                torch.einsum('bd,dn->bn', z_flattened, rearrange(self.embedding.weight, 'n d -> d n'))
+            
+            min_encoding_indices = torch.argmin(d, dim=1)
+            # distances = d[range(d.shape[0]), min_encoding_indices].view(z.shape[0], z.shape[1])
+            # distances = self.rbf(distances)
 
-
-        # get quantized vector and normalize
-        z_q = self.embedding(min_encoding_indices).view(z.shape)
+            zn= torch.nn.functional.normalize(self.embedding(min_encoding_indices)).view(z.shape)
+            # get quantized vector and normalize
+            z_q2 = self.embedding(min_encoding_indices).view(z.shape)
         loss = 0
-        cb_loss = 0
-        prevcb=  cb_attnp = None
+        #cb_loss = 0
+        prevcb=  cb_attnp = cb_attn = None
                 
         if not (prev_cb is None):
-            prevcb = self.to_poincare(self.h1(self.expmap0(prev_cb.clone().detach(),1)),1)
+            #prevcb = self.to_poincare(self.h1(self.expmap0(torch.nn.functional.normalize(prev_cb.clone().detach()),1)),1)
+            #prevcb = self.to_poincare(self.h1(self.expmap0(prev_cb.clone().detach(),1)),1)
+            prevcb = prev_cb.clone().detach()
             cb_attn = torch.einsum('md,mn->nd', 
                                     self.logmap0(self.h(self.expmap0(prev_cb.clone().detach(), 1)),1), 
                                     attention_w)
@@ -1074,11 +1076,15 @@ class VectorQuantizer2DHS(nn.Module):
             torch.sum(cb_attn**2, dim=1) - 2 * \
             torch.einsum('bd,dn->bn', z_flattened, rearrange(cb_attn, 'n d -> d n'))
             min_encoding_indices1 = torch.argmin(d1, dim=1)
-            cb_attnp = self.to_poincare(self.h1(self.expmap0(cb_attn, 1)), 1)
+            #cb_attnp = self.to_poincare(self.h1(self.expmap0(cb_attn, 1)), 1)
+            zn= torch.nn.functional.normalize(cb_attn[min_encoding_indices1]).view(z.shape)
             z_q2 = cb_attn[min_encoding_indices1].view(z.shape)
-            cb_loss = F.mse_loss(z_q, z_q2)
-        else:
-            z_q2 = z_q
+            codebookvariance=total_min_distance=hsw = 0
+
+
+        #  cb_loss = F.mse_loss(z_q, z_q2)
+        #else:
+         #   z_q2 = z_q
         """
         if not (prev_cb is None):
             cb_attn = torch.einsum('md,mn->nd',
@@ -1097,13 +1103,13 @@ class VectorQuantizer2DHS(nn.Module):
         # compute loss for embedding
         if  (prev_cb is None):
             if not self.legacy:
-                loss = self.beta * torch.mean((z_q.detach() - z) ** 2) 
+                loss = self.beta * torch.mean((z_q2.detach() - z) ** 2) 
                 if not self.ignorezq:
-                    loss += torch.mean((z_q - z.detach()) ** 2) 
+                    loss += torch.mean((z_q2 - z.detach()) ** 2) 
             else:
-                loss = torch.mean((z_q.detach() - z) ** 2)  
+                loss = torch.mean((z_q2.detach() - z) ** 2)  
                 if not self.ignorezq:
-                    loss += self.beta * torch.mean((z_q - z.detach()) ** 2)
+                    loss += self.beta * torch.mean((z_q2 - z.detach()) ** 2)
 
             #loss += cb_loss
             disentanglement_loss = codebookvariance - total_min_distance
@@ -1119,11 +1125,10 @@ class VectorQuantizer2DHS(nn.Module):
         """ 
 
         # preserve gradients
-        z_q = z + (z_q - z).detach()
+#        z_q = z + (z_q - z).detach()
         z_q2 = z + (z_q2 - z).detach()
         # reshape back to match original input shape
         # z_q = rearrange(z_q, 'b h w c-> b c h w').contiguous()
-
 
         # if self.remap is not None:
         #     min_encoding_indices = min_encoding_indices.reshape(z.shape[0],-1) # add batch axis
@@ -1136,14 +1141,14 @@ class VectorQuantizer2DHS(nn.Module):
 
 
         sampled_idx = torch.zeros(z.shape[0]*self.n_e).to(z.device)
-        sampled_idx[min_encoding_indices] = 1
-        sampled_idx = sampled_idx.view(z.shape[0], self.n_e)
+       # sampled_idx[min_encoding_indices] = 1
+       # sampled_idx = sampled_idx.view(z.shape[0], self.n_e)
         return (z_q2, loss,
-                    (sampled_idx, min_encoding_indices), 
+                    sampled_idx, 
                     codebookvariance, 
                     total_min_distance,  
                     hsw, 
-                    torch.mean(self.r), prevcb, attention_w, cb_attnp)
+                    torch.mean(self.r), prevcb, attention_w,  cb_attn, zn)
                     
 
     def get_codebook_entry(self, indices, shape):
@@ -1697,13 +1702,11 @@ class weightConstraint(object):
     def __call__(self,module):
         if hasattr(module,'weight'):
             w=module.weight.data
-            w=tempsigmoid(w)
-            """
             w = torch.heaviside(w, torch.tensor([0.0]))
             x = torch.sum(w, 0)
             x = x.repeat(w.shape[0], 1)
             w = w/x
-            """
+        
             module.weight.data=w
 
 class weightConstraint1(object):
@@ -1715,6 +1718,27 @@ class weightConstraint1(object):
             w=module.weight.data
             w=tempsigmoid(w)
             module.weight.data=w
+
+class weightConstraint2(object):
+    def __init__(self):
+        pass
+
+    def __call__(self,module):
+        if hasattr(module,'weight'):
+            w=module.weight.data
+            w = torch.heaviside(w, torch.tensor([0.0]))
+            x = w.shape[0]
+            module.weight.data=w
+
+class weightConstraint3(object):
+    def __init__(self):
+        pass
+
+    def __call__(self,module):
+        if hasattr(module,'weight'):
+            w=module.weight.data
+            x = w.shape[1]
+            module.weight.data=w/8
 class HierarchyVQmodulator(nn.Module):
 
     def __init__(self, *, 
@@ -1740,15 +1764,17 @@ class HierarchyVQmodulator(nn.Module):
 
         self.conv1 = torch.nn.Conv2d(features,
                                        z_channels,
-                                       kernel_size=1,
+                                       kernel_size=3,
                                        stride=1,
+                                       padding=1
                                        )
 
         self.norm2 = nn.BatchNorm2d(z_channels, affine=True)
         self.conv2 = torch.nn.Conv2d(z_channels,
                                       z_channels,
-                                      kernel_size=1,
+                                      kernel_size=3,
                                       stride=1,
+                                      padding =1,
                                       )
         # ============
 
@@ -1758,7 +1784,9 @@ class HierarchyVQmodulator(nn.Module):
         self.epsilon = 1e-4
         self.eps = {torch.float32: 4e-3, torch.float64: 1e-5}
         self.min_norm = 1e-15
-
+        self.hp1 =  HNNLayer(emb_dim, 3, 1, 0, True)
+        self.hp2 =  HNNLayer(emb_dim, 3, 1, 0, True)
+        self.hp3 =  HNNLayer(emb_dim, 3, 1, 0, True)
         if not gumble:
             self.quantize = VectorQuantizer2DHS(device, 
                                     codebooksize[0], 
@@ -1824,16 +1852,17 @@ class HierarchyVQmodulator(nn.Module):
         self.q3conv = torch.nn.Linear(z_channels, z_channels)
         """
         self.q1conv = BinaryLinear(z_channels,z_channels)
-        self.q2conv = BinaryLinear(z_channels, z_channels)
+        #self.q2conv = BinaryLinear(z_channels, z_channels)
         self.q3conv = BinaryLinear(z_channels, z_channels)
         
-        self.h =  HypLinear(emb_dim, emb_dim, 1, 0, True )
-        self.h2 =  HypLinear(emb_dim, emb_dim, 1, 0, True )
+        self.h =  HNNLayer(emb_dim, emb_dim, 1, 0, True )
+        self.h2 =  HNNLayer(emb_dim, emb_dim, 1, 0, True )
         #self.h3 =  HypLinear(emb_dim, emb_dim, 1, 0, True )
-        wc = weightConstraint1()
-        self.q1conv.apply(wc)
-        self.q2conv.apply(wc)
-        self.q3conv.apply(wc)
+        wc = weightConstraint2()
+        wc1 = weightConstraint3()
+        #self.q1conv.apply(wc)
+        #self.q2conv.apply(wc)
+        #self.q3conv.apply(wc)
         if self.trim:
             self.q1conv = torch.nn.Conv2d(z_channels,
                                         z_channels//4,
@@ -1885,7 +1914,8 @@ class HierarchyVQmodulator(nn.Module):
             self.rattn3 = BinaryLinear(codebooksize[2],
                                         codebooksize[3],
                                         )
-        
+            self.rattn2.apply(wc)
+            self.rattn3.apply(wc) 
         
         """
         if self.reasoning:
@@ -1966,7 +1996,11 @@ class HierarchyVQmodulator(nn.Module):
         z = torch.sqrt(y - 1)
         return torch.log(x + z)
 
-
+    def to_poincare(self, x, c):
+        K = 1. / c
+        sqrtK = K ** 0.5
+        d = x.size(-1) - 1
+        return sqrtK * x.narrow(-1, 1, d) / (x[:, 0:1] + sqrtK)
     def attention(self, input_,  w, y, conv=None, h = None):
         # x = input_ + (w * x.view(-1, self.emb_dim)).view(x.shape)
 
@@ -2012,7 +2046,7 @@ class HierarchyVQmodulator(nn.Module):
         shape = x2.shape
         assert self.emb_dim == shape[2]*shape[3]
 
-        z_q1, loss1, sampled_idx1, ce1, td1, hrc1, r1, prevcb1, attention_w1, cb_attnp1 = self.quantize(x2)
+        z_q1, loss1, sampled_idx1, ce1, td1, hrc1, r1, prevcb1, attention_w1, cb_attnp1, zn1 = self.quantize(x2)
         z_q1_attn = self.attention(x2, self.q1w, z_q1, self.q1conv, self.h)
         #z_q1_attn = self.attention(x2, self.q1w, z_q1, self.binaryc1, self.h)
         """
@@ -2023,7 +2057,7 @@ class HierarchyVQmodulator(nn.Module):
         z_q2_attn = self.attention(z_q1_attn, self.q2w, z_q2, self.q2conv, self.h)
         """
         #z_q2_attn = self.attention(z_q1_attn, self.q2w, z_q2, self.binaryc2, self.h)
-        z_q3, loss3, sampled_idx3, ce3, td3, hrc3, r3, prevcb3, attention_w3, cb_attnp3 = self.quantize2(z_q1_attn,
+        z_q3, loss3, sampled_idx3, ce3, td3, hrc3, r3, prevcb3, attention_w3, cb_attnp3, zn2 = self.quantize2(z_q1_attn,
                                                                     self.quantize.embedding.weight,
                                                                     self.rattn2.weight.T)
                                                                     #self.binary2.weight.T)
@@ -2031,31 +2065,65 @@ class HierarchyVQmodulator(nn.Module):
         #z_q3_attn = self.attention(z_q2_attn, self.q3w, z_q3, self.binaryc3, self.h)
 
 
-        z_q4, loss4, sampled_idx4, ce4, td4, hrc4, r4,  prevcb4, attention_w4, cb_attnp4 = self.quantize3(z_q3_attn,
-                                                                    self.quantize2.embedding.weight,
+        z_q4, loss4, sampled_idx4, ce4, td4, hrc4, r4,  prevcb4, attention_w4, cb_attnp4, zn3= self.quantize3(z_q3_attn,
+                                                                    cb_attnp3,
                                                                     self.rattn3.weight.T)
                                                                     #self.binary3.weight.T)
 
         # logs
         #attention2 = torch.where(attention_w2 > 0.5, 1,0)
-        attention3 = torch.where(attention_w3 > 0.0, 1,0)
-        attention4 = torch.where(attention_w4 > 0.0, 1,0)
+        attention3 = torch.where(attention_w3 > 0.5, 1,0)
+        attention4 = torch.where(attention_w4 > 0.5, 1,0)
+        """
+        prevcb3 = prevcb3[torch.abs(attention3).sum(dim=1) != 0]
+        cb_attnp3p = cb_attnp3[torch.abs(attention3).sum(dim=0) != 0]
+        #print(prevcb3.shape)
+        #print(cb_attnp3p.shape)
+        
+        attention3 = attention3[torch.abs(attention3).sum(dim=1) != 0]
+        attention3 = attention3[:,torch.abs(attention3).sum(dim=0) != 0]
+        attention4 = torch.where(attention_w4 > 0.5, 1,0)
+        e = (torch.abs(attention3).sum(dim=0) != 0).nonzero(as_tuple=False)
+        f = (torch.abs(attention4).sum(dim=1) != 0).nonzero(as_tuple=False)
+        g =torch.cat((e,f))
+        g = torch.unique(g)
+        cb_attnp3b = cb_attnp3[torch.abs(attention4).sum(dim=1) != 0]
+        cb_attnp4 = cb_attnp4[torch.abs(attention4).sum(dim=0) != 0]
+        attention4 = attention4[torch.abs(attention4).sum(dim=1) != 0]
+        #attention4 = attention4[torch.abs(attention3).sum(dim=0) != 0]
+        attention4 = attention4[:, torch.abs(attention4).sum(dim=0) != 0]
+        """
         #attention2b = torch.where(attention_w2 > 0.5, 0,1)
-        attention3b = torch.where(attention_w3 > 0.0, 0,1)
-        attention4b = torch.where(attention_w4 > 0.0, 0,1)
+        attention3b = torch.where(attention3 > 0.5, 0,1)
+        #attention3b = attention3b[torch.abs(attention3b).sum(dim=1) != 0]
+        #attention3b = attention3b[:,torch.abs(attention3b).sum(dim=0) != 0]
+        attention4b = torch.where(attention4 > 0.5, 0,1)
+        #attention4b = attention4b[torch.abs(attention4b).sum(dim=1) != 0]
+        #attention4b = attention4b[:, torch.abs(attention4b).sum(dim=0) != 0]
         #pd1 = self.dist(prevcb2, cb_attnp2)
+        #prevcb3 = self.hp1(self.to_poincare(self.expmap0(prevcb3,1),1))
+        prevcb3 = self.to_poincare(self.hp1(self.expmap0(prevcb3,1)),1)
+        cb_attnp4 = self.to_poincare(self.hp3(self.expmap0(cb_attnp4,1)),1)
+        cb_attnp3 = self.to_poincare(self.hp2(self.expmap0(cb_attnp3,1)),1)
+        #cb_attnp3b = self.to_poincare(self.hp1(self.expmap0(cb_attnp3b,1)),1)
+        #cb_attnp4 = self.hp3(self.to_poincare(self.expmap0(cb_attnp4,1),1))
+        #cb_attnp3p = self.hp2(self.to_poincare(self.expmap0(cb_attnp3p,1),1))
+        #cb_attnp3b = self.hp2(self.to_poincare(self.expmap0(cb_attnp3b,1),1))
+
+
         pd2 = self.dist(prevcb3, cb_attnp3)
-        pd3 = self.dist(prevcb4, cb_attnp4)
+        pd3 = self.dist(cb_attnp3, cb_attnp4)
         #pd4 = self.dist(prevcb2, cb_attnp3)
         #pd5 = self.dist(prevcb2, cb_attnp4)
         pd6 = self.dist(prevcb3, cb_attnp4)
         pd1s = self.dist(prevcb3, prevcb3)
-        pd2s = self.dist(prevcb4, prevcb4)
+        pd2s = self.dist(cb_attnp3, cb_attnp3)
+        #pd2sb = self.dist(cb_attnp3b, cb_attnp3b)
         pd3s = self.dist(cb_attnp4, cb_attnp4)
         #ploss = (torch.sum(attention2 * pd1) + torch.sum(attention3 * pd2) + torch.sum(attention4 * pd3))/ \
         #(torch.sum( (attention2b)*pd1) + torch.sum((attention3b)*pd2) + torch.sum((attention4b)*pd3) + torch.sum(pd4) + torch.sum(pd5) +torch.sum(pd6))
         ploss =  (torch.sum(attention3 * pd2) + torch.sum(attention4 * pd3))/ \
-        ( torch.sum((attention3b)*pd2) + torch.sum((attention4b)*pd3)  +torch.sum(pd6)+ torch.sum(pd1s) + torch.sum(pd2s) + +torch.sum(pd3s))
+        ( torch.sum((attention3b)*pd2) + torch.sum((attention4b)*pd3)  +torch.sum(pd6)+ torch.sum(pd1s) + torch.sum(pd2s) + torch.sum(pd3s))
         #print(attention3)
         #(torch.sum( (1-attention2)*pd1) + torch.sum((1-attention3)*pd2) + torch.sum((1-attention4)*pd3) + torch.sum(pd4) + torch.sum(pd5) +torch.sum(pd6))
         #(torch.sum( (attention2b)*pd1) + torch.sum((attention3b)*pd2) + torch.sum((attention4b)*pd3) + torch.sum(pd4) + torch.sum(pd5) +torch.sum(pd6))
@@ -2086,7 +2154,7 @@ class HierarchyVQmodulator(nn.Module):
                     [z_q1,  z_q3, z_q4],
                     z_q,  
                     [sampled_idx1,  sampled_idx3, sampled_idx4],
-                    ce, td, hrc, r, [ attention3, attention4], [prevcb3, prevcb4, cb_attnp4])
+                    ce, td, hrc, r, [ attention3, attention4], [prevcb3, cb_attnp3, cb_attnp4])
 
 class VectorQuantizer2DHB(nn.Module):
     """
@@ -2832,10 +2900,296 @@ class HNNLayer(nn.Module):
 
     def forward(self, x):
         h = self.linear(x)
-        h = self.hyp_act(h)
+        #h = self.hyp_act(h)
         return h
 
+class HypLinearP(nn.Module):
+    """
+    Hyperbolic linear layer.
+    """
 
+    def __init__(self, in_features, out_features, c, dropout, use_bias):
+        super(HypLinearP, self).__init__()
+        self.in_features = in_features
+        self.out_features = out_features
+        self.c = c
+        self.dropout = dropout
+        self.use_bias = use_bias
+        self.bias = nn.Parameter(torch.Tensor(out_features))
+        self.weight = nn.Parameter(torch.Tensor(out_features, in_features))
+        self.reset_parameters()
+        self.min_norm = 1e-15
+        self.eps = {torch.float32: 4e-3, torch.float64: 1e-5}
+        self.max_norm = 1e6
+    def reset_parameters(self):
+        init.xavier_uniform_(self.weight, gain=math.sqrt(2))
+        init.constant_(self.bias, 0)
+
+    
+    
+    def proj(self, x, c):
+        norm = torch.clamp_min(x.norm(dim=-1, keepdim=True, p=2), self.min_norm)
+        maxnorm = (1 - self.eps[x.dtype]) / (c ** 0.5)
+        cond = norm > maxnorm
+        projected = x / norm * maxnorm
+        return torch.where(cond, projected, x)
+    def proj_tan0(self, u, c):
+        return u
+    def mobius_add(self, x, y, c, dim=-1):
+        x2 = x.pow(2).sum(dim=dim, keepdim=True)
+        y2 = y.pow(2).sum(dim=dim, keepdim=True)
+        xy = (x * y).sum(dim=dim, keepdim=True)
+        num = (1 + 2 * c * xy + c * y2) * x + (1 - c * x2) * y
+        denom = 1 + 2 * c * xy + c ** 2 * x2 * y2
+        return num / denom.clamp_min(self.min_norm)
+    def expmap0(self, u, c):
+        sqrt_c = c ** 0.5
+        u_norm = torch.clamp_min(u.norm(dim=-1, p=2, keepdim=True), self.min_norm)
+        gamma_1 = tanh(sqrt_c * u_norm) * u / (sqrt_c * u_norm)
+        return gamma_1
+    def mobius_matvec(self, m, x, c):
+        sqrt_c = c ** 0.5
+        x_norm = x.norm(dim=-1, keepdim=True, p=2).clamp_min(self.min_norm)
+        mx = x @ m.transpose(-1, -2)
+        mx_norm = mx.norm(dim=-1, keepdim=True, p=2).clamp_min(self.min_norm)
+        res_c = tanh(mx_norm / x_norm * artanh(sqrt_c * x_norm)) * mx / (mx_norm * sqrt_c)
+        cond = (mx == 0).prod(-1, keepdim=True, dtype=torch.uint8)
+        res_0 = torch.zeros(1, dtype=res_c.dtype, device=res_c.device)
+        res = torch.where(cond, res_0, res_c)
+        return res
+    """
+
+    def proj(self, x, c):
+        K = 1. / c
+        d = x.size(-1) - 1
+        y = x.narrow(-1, 1, d)
+        y_sqnorm = torch.norm(y, p=2, dim=1, keepdim=True) ** 2
+        mask = torch.ones_like(x)
+        mask[:, 0] = 0
+        vals = torch.zeros_like(x)
+        vals[:, 0:1] = torch.sqrt(torch.clamp(K + y_sqnorm, min=self.eps[x.dtype]))
+        return vals + mask * x
+
+    def proj_tan(self, u, x, c):
+        K = 1. / c
+        d = x.size(1) - 1
+        ux = torch.sum(x.narrow(-1, 1, d) * u.narrow(-1, 1, d), dim=1, keepdim=True)
+        mask = torch.ones_like(u)
+        mask[:, 0] = 0
+        vals = torch.zeros_like(u)
+        vals[:, 0:1] = ux / torch.clamp(x[:, 0:1], min=self.eps[x.dtype])
+        return vals + mask * u
+
+    def proj_tan0(self, u, c):
+        narrowed = u.narrow(-1, 0, 1)
+        vals = torch.zeros_like(u)
+        vals[:, 0:1] = narrowed
+        return u - vals
+
+    def expmap(self, u, x, c):
+        K = 1. / c
+        sqrtK = K ** 0.5
+        normu = self.minkowski_norm(u)
+        normu = torch.clamp(normu, max=self.max_norm)
+        theta = normu / sqrtK
+        theta = torch.clamp(theta, min=self.min_norm)
+        result = cosh(theta) * x + sinh(theta) * u / theta
+        return self.proj(result, c)
+
+    def logmap(self, x, y, c):
+        K = 1. / c
+        xy = torch.clamp(self.minkowski_dot(x, y) + K, max=-self.eps[x.dtype]) - K
+        u = y + xy * x * c
+        normu = self.minkowski_norm(u)
+        normu = torch.clamp(normu, min=self.min_norm)
+        dist = self.sqdist(x, y, c) ** 0.5
+        result = dist * u / normu
+        return self.proj_tan(result, x, c)
+
+    def ptransp0(self, x, u, c):
+        K = 1. / c
+        sqrtK = K ** 0.5
+        x0 = x.narrow(-1, 0, 1)
+        d = x.size(-1) - 1
+        y = x.narrow(-1, 1, d)
+        y_norm = torch.clamp(torch.norm(y, p=2, dim=1, keepdim=True), min=self.min_norm)
+        y_normalized = y / y_norm
+        v = torch.ones_like(x)
+        v[:, 0:1] = - y_norm 
+        v[:, 1:] = (sqrtK - x0) * y_normalized
+        alpha = torch.sum(y_normalized * u[:, 1:], dim=1, keepdim=True) / sqrtK
+        res = u - alpha * v
+        return self.proj_tan(res, x, c)
+    def expmap0(self, u, c):
+        K = 1. / c
+        sqrtK = K ** 0.5
+        d = u.size(-1) - 1
+        x = u.narrow(-1, 1, d).view(-1, d)
+        x_norm = torch.norm(x, p=2, dim=1, keepdim=True)
+        x_norm = torch.clamp(x_norm, min=self.min_norm)
+        theta = x_norm / sqrtK
+        res = torch.ones_like(u)
+        res[:, 0:1] = sqrtK * cosh(theta)
+        res[:, 1:] = sqrtK * sinh(theta) * x / x_norm
+        return self.proj(res, c)
+
+    def logmap0(self, x, c):
+        K = 1. / c
+        sqrtK = K ** 0.5
+        d = x.size(-1) - 1
+        y = x.narrow(-1, 1, d).view(-1, d)
+        y_norm = torch.norm(y, p=2, dim=1, keepdim=True)
+        y_norm = torch.clamp(y_norm, min=self.min_norm)
+        res = torch.zeros_like(x)
+        theta = torch.clamp(x[:, 0:1] / sqrtK, min=1.0 + self.eps[x.dtype])
+        res[:, 1:] = sqrtK * arcosh(theta) * y / y_norm
+        return res
+
+    def minkowski_dot(self, x, y, keepdim=True):
+        res = torch.sum(x * y, dim=-1) - 2 * x[..., 0] * y[..., 0]
+        if keepdim:
+            res = res.view(res.shape + (1,))
+        return res
+
+    def minkowski_norm(self, u, keepdim=True):
+        dot = self.minkowski_dot(u, u, keepdim=keepdim)
+        return torch.sqrt(torch.clamp(dot, min=self.eps[u.dtype]))
+
+    def mobius_add(self, x, y, c):
+        u = self.logmap0(y, c)
+        v = self.ptransp0(x, u, c)
+        return self.expmap(v, x, c)
+
+    def mobius_matvec(self, m, x, c):
+        u = self.logmap0(x, c)
+        mu = u @ m.transpose(-1, -2)
+        return self.expmap0(mu, c)
+    """
+    
+    def forward(self, x):
+        drop_weight = F.dropout(self.weight, self.dropout, training=self.training)
+        mv = self.mobius_matvec(m = drop_weight,x=x, c =self.c)
+        res = self.proj(mv, self.c)
+        if self.use_bias:
+            bias = self.proj_tan0(self.bias.view(1, -1), c = self.c)
+            hyp_bias = self.expmap0(bias, c =self.c)
+            hyp_bias = self.proj(hyp_bias, c =self.c)
+            res = self.mobius_add(res, hyp_bias, c=self.c)
+            res = self.proj(res, c =self.c)
+        return res
+
+    def extra_repr(self):
+        return 'in_features={}, out_features={}, c={}'.format(
+            self.in_features, self.out_features, self.c
+        )
+class HypActP(nn.Module):
+    """
+    Hyperbolic activation layer.
+    """
+
+    def __init__(self,  c_in, c_out):
+        super(HypActP, self).__init__()
+        self.c_in = c_in
+        self.c_out = c_out
+        self.act = nn.ReLU()
+        self.min_norm = 1e-15
+        self.eps = {torch.float32: 4e-3, torch.float64: 1e-5}
+    """
+    def expmap0(self, u, c):
+        K = 1. / c
+        sqrtK = K ** 0.5
+        d = u.size(-1) - 1
+        x = u.narrow(-1, 1, d).view(-1, d)
+        x_norm = torch.norm(x, p=2, dim=1, keepdim=True)
+        x_norm = torch.clamp(x_norm, min=self.min_norm)
+        theta = x_norm / sqrtK
+        res = torch.ones_like(u)
+        res[:, 0:1] = sqrtK * cosh(theta)
+        res[:, 1:] = sqrtK * sinh(theta) * x / x_norm
+        return self.proj(res, c)
+    def logmap0(self, x, c):
+        K = 1. / c
+        sqrtK = K ** 0.5
+        d = x.size(-1) - 1
+        y = x.narrow(-1, 1, d).view(-1, d)
+        y_norm = torch.norm(y, p=2, dim=1, keepdim=True)
+        y_norm = torch.clamp(y_norm, min=self.min_norm)
+        res = torch.zeros_like(x)
+        theta = torch.clamp(x[:, 0:1] / sqrtK, min=1.0 + self.eps[x.dtype])
+        res[:, 1:] = sqrtK * arcosh(theta) * y / y_norm
+        return res
+    def proj(self, x, c):
+        K = 1. / c
+        d = x.size(-1) - 1
+        y = x.narrow(-1, 1, d)
+        y_sqnorm = torch.norm(y, p=2, dim=1, keepdim=True) ** 2
+        mask = torch.ones_like(x)
+        mask[:, 0] = 0
+        vals = torch.zeros_like(x)
+        vals[:, 0:1] = torch.sqrt(torch.clamp(K + y_sqnorm, min=self.eps[x.dtype]))
+        return vals + mask * x
+    def proj_tan(self, u, x, c):
+        K = 1. / c
+        d = x.size(1) - 1
+        ux = torch.sum(x.narrow(-1, 1, d) * u.narrow(-1, 1, d), dim=1, keepdim=True)
+        mask = torch.ones_like(u)
+        mask[:, 0] = 0
+        vals = torch.zeros_like(u)
+        vals[:, 0:1] = ux / torch.clamp(x[:, 0:1], min=self.eps[x.dtype])
+        return vals + mask * u
+    def proj_tan0(self, u, c):
+        narrowed = u.narrow(-1, 0, 1)
+        vals = torch.zeros_like(u)
+        vals[:, 0:1] = narrowed
+        return u - vals
+    """
+    def expmap0(self, u, c):
+        sqrt_c = c ** 0.5
+        u_norm = torch.clamp_min(u.norm(dim=-1, p=2, keepdim=True), self.min_norm)
+        gamma_1 = tanh(sqrt_c * u_norm) * u / (sqrt_c * u_norm)
+        return gamma_1
+    def logmap0(self, p, c):
+        sqrt_c = c ** 0.5
+        p_norm = p.norm(dim=-1, p=2, keepdim=True).clamp_min(self.min_norm)
+        scale = 1. / sqrt_c * artanh(sqrt_c * p_norm) / p_norm
+        return scale * p
+    def proj(self, x, c):
+        norm = torch.clamp_min(x.norm(dim=-1, keepdim=True, p=2), self.min_norm)
+        maxnorm = (1 - self.eps[x.dtype]) / (c ** 0.5)
+        cond = norm > maxnorm
+        projected = x / norm * maxnorm
+        return torch.where(cond, projected, x)
+    def proj_tan(self, u, p, c):
+        return u
+    def proj_tan0(self, u, c):
+        return u
+    
+
+
+    def forward(self, x):
+        xt = self.act(self.logmap0(x, c=self.c_in))
+        xt = self.proj_tan0(xt, c=self.c_out)
+        return self.proj(self.expmap0(xt, c=self.c_out), c=self.c_out)
+
+    def extra_repr(self):
+        return 'c_in={}, c_out={}'.format(
+            self.c_in, self.c_out
+        )
+
+class HNNLayerP(nn.Module):
+    """
+    Hyperbolic neural networks layer.
+    """
+
+    def __init__(self,  in_features, out_features, c, dropout, use_bias):
+        super(HNNLayerP, self).__init__()
+        self.linear = HypLinear( in_features, out_features, c, dropout, use_bias)
+        self.hyp_act = HypAct( c, c)
+
+    def forward(self, x):
+        h = self.linear(x)
+        h = self.hyp_act(h)
+        return h
 class HierarchyVQhb(nn.Module):
 
     def __init__(self, *,
