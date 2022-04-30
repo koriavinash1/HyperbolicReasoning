@@ -80,7 +80,7 @@ class weightConstraint2(object):
 class Trainer():
     def __init__(self,
                     classifier,
-                    codebook_length = 256,
+                    codebook_length = 128,
                     sampling_size = 128,
                     name = 'default',
                     data_root = './data',
@@ -178,6 +178,7 @@ class Trainer():
         
         # Quantized classifier
         self.inchannel = self.latent_size #self.emb_dim  if (self.trim and not self.combine) else np.prod(self.latentdim)      
+        #self.inchannel = self.emb_dim  if (self.trim and not self.combine) else np.prod(self.latentdim)
         clfq = []
         clfq.append(nn.Linear(self.inchannel, self.nclasses ))
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
@@ -284,6 +285,7 @@ class Trainer():
             else:
                 decoder_features = classifier_features = features
             classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
+            #classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1] * classifier_features.shape[2]*classifier_features.shape[3])
             #print(classifier_features.shape)
             dis_target = m(self.cq(classifier_features))
             class_loss_ = ce_loss(logits = dis_target, target = conti_target)
@@ -360,7 +362,7 @@ class Trainer():
                 decoder_features = classifier_features = features
 
             classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
-
+            #classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1] * classifier_features.shape[2]*classifier_features.shape[3])
 
             dis_target = m(self.cq(classifier_features))
             recon = self.dec(decoder_features)
@@ -438,7 +440,7 @@ class Trainer():
             self.training_step(train_loader, iepoch)
             loss, rloss, f1, acc, attnblocks, codebooks= self.validation_step(valid_loader, iepoch)
 
-            if iepoch==0:
+            if iepoch==40:
                 for i in range(len(attnblocks)):
                     att = attnblocks[i].cpu().numpy()
                     cb1 = codebooks[i].cpu().numpy()
@@ -460,7 +462,7 @@ class Trainer():
                                     #               else:
               #                  plt.plot(x, y)
 
-            plt.savefig('/vol/biomedic3/as217/GeometricSymbolicAI/SymbolicInterpretability/SymbolicInterpretability/src/images/poincaretesthack2.png')
+            plt.savefig('/vol/biomedic3/as217/GeometricSymbolicAI/SymbolicInterpretability/SymbolicInterpretability/src/images/poincaretesthacksphere.png')
                   
 
             stats = {'loss': loss, 'f1': f1, 'acc': acc, 'rloss': rloss}

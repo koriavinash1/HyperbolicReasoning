@@ -99,11 +99,11 @@ class ResnetBlock(nn.Module):
 
     def forward(self, x):
         h = x
-        h = self.norm1(h)
+        #h = self.norm1(h)
         h = nonlinearity(h)
         h = self.conv1(h)
 
-        h = self.norm2(h)
+        #h = self.norm2(h)
         h = nonlinearity(h)
         h = self.dropout(h)
         h = self.conv2(h)
@@ -154,13 +154,13 @@ class ResnetBlock2D(nn.Module):
 
     def forward(self, x):
         h = x
-        h = self.norm1(h)
-        h = nonlinearity(h)
+       # h = self.norm1(h)
+       # h = nonlinearity(h)
         h = self.conv1(h)
 
-        h = self.norm2(h)
-        h = nonlinearity(h)
-        h = self.dropout(h)
+        #h = self.norm2(h)
+       # h = nonlinearity(h)
+        #h = self.dropout(h)
         h = self.conv2(h)
 
         if self.in_channels != self.out_channels:
@@ -831,13 +831,13 @@ class VectorQuantizer2DHS(nn.Module):
                                             self.e_dim)
 
         self.h =  HNNLayer(e_dim, e_dim, 1, 0, True)
-        #self.h1 =  HypLinear(e_dim, 3, 1, 0, True)        
+        self.h1 =  HypLinear(e_dim, e_dim, 1, 0, True)        
 
 
         points_in_manifold = torch.Tensor(sphere.random_uniform(n_samples=self.n_e))
-        #self.embedding.weight.data.copy_(points_in_manifold).requires_grad=True
+        self.embedding.weight.data.copy_(points_in_manifold).requires_grad=True
 
-        self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
+        #self.embedding.weight.data.uniform_(-1.0 / self.n_e, 1.0 / self.n_e)
 
 
         self.hsreg = lambda x: [ torch.norm(x[i]) for i in range(x.shape[0])]
@@ -892,13 +892,14 @@ class VectorQuantizer2DHS(nn.Module):
         p_norm = p.norm(dim=1, p=2, keepdim=True).clamp_min(self.min_norm)
         scale = 1. / sqrt_c * artanh(sqrt_c * p_norm) / p_norm
         return scale * p
-    def proj(self, x, c):
+    """
+    def projp(self, x, c):
         norm = torch.clamp_min(x.norm(dim=-1, keepdim=True, p=2), self.min_norm)
         maxnorm = (1 - self.eps[x.dtype]) / (c ** 0.5)
         cond = norm > maxnorm
         projected = x / norm * maxnorm
         return torch.where(cond, projected, x)
-    """
+    
     def proj(self, x, c):
         K = 1. / c
         d = x.size(-1) - 1
@@ -959,20 +960,20 @@ class VectorQuantizer2DHS(nn.Module):
         y =  torch.clamp(x ** 2, min=1.0 + self.epsilon)
         #x = 1 + 2 * sqdist / torch.mm((1 - squnorm), (1 - sqvnorm)) + self.epsilon
         z = torch.sqrt(y - 1)
-        return torch.clamp(torch.log(x + z), max =2.5)
+        return torch.log(x + z)
 
 
-    """
-    def dist(self, u, v):
+    
+    def disth(self, u, v):
         sqdist = torch.einsum('bd,dn->bn', u, rearrange(v, 'n d -> d n'))
-                
+        """        
         u = torch.t(u[:,0].repeat(u.shape[1], 1))
         v = (v[:, 0].repeat(v.shape[1], 1))
         uv = torch.einsum('bd,dn->bn', u, v)
         theta = sqdist - 2* uv
         theta = torch.clamp(theta, min=1.0 + self.epsilon)
         return arcosh(theta) ** 2
-        
+        """
         theta = torch.clamp(sqdist, min=1.0 + self.epsilon)
         return arcosh(theta) ** 2
     def minkowski_dot(self, x, y, keepdim=True):
@@ -985,7 +986,7 @@ class VectorQuantizer2DHS(nn.Module):
         dot = self.minkowski_dot(u, u, keepdim=keepdim)
         return torch.sqrt(torch.clamp(dot, min=self.epsilon))
     
-    def sdist(self, x, y, c):
+    def sdisth(self, x, y, c):
         K = 1. / c
         prod = self.minkowski_dot(x, y)
         theta = torch.clamp(prod / K, min=1.0 + self.epsilon)
@@ -994,9 +995,9 @@ class VectorQuantizer2DHS(nn.Module):
         return torch.clamp(sqdist, max=50.0)
     
 
-    def sdist(self, u, v):
+    def sdisthh(self, u, v):
         res = torch.sum(u * v, dim = 1)
-    """
+    
     def HLoss(self, x):
         b = F.softmax(x, dim=1) * F.log_softmax(x, dim=1)
         b = -1.0 * b.sum()
@@ -1021,7 +1022,7 @@ class VectorQuantizer2DHS(nn.Module):
         assert rescale_logits==False, "Only for interface compatible with Gumbel"
         assert return_logits==False, "Only for interface compatible with Gumbel"
         z_flattened = z.view(-1, self.e_dim)
-       # z_flattened = torch.nn.functional.normalize(z_flattened)
+        #z_flattened = torch.nn.functional.normalize(z_flattened)
         #z = z_flattened.view(z.shape)
         if (prev_cb is None):       
         # reshape z -> (batch, height, width, channel) and flatten
@@ -1047,7 +1048,7 @@ class VectorQuantizer2DHS(nn.Module):
             total_min_distance = torch.mean(min_distance[0])
             codebookvariance = torch.mean(torch.var(d1, 1))
             # codebookvariance = torch.var(min_distance[0])
-
+ 
             # distances from z to embeddings e_j (z - e)^2 = z^2 + e^2 - 2 e * z
             d = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + \
                 torch.sum(self.embedding.weight**2, dim=1) - 2 * \
@@ -1061,7 +1062,7 @@ class VectorQuantizer2DHS(nn.Module):
             # get quantized vector and normalize
             z_q2 = self.embedding(min_encoding_indices).view(z.shape)
         loss = 0
-        #cb_loss = 0
+        cb_loss = 0
         prevcb=  cb_attnp = cb_attn = None
                 
         if not (prev_cb is None):
@@ -1069,18 +1070,27 @@ class VectorQuantizer2DHS(nn.Module):
             #prevcb = self.to_poincare(self.h1(self.expmap0(prev_cb.clone().detach(),1)),1)
             prevcb = prev_cb.clone().detach()
             cb_attn = torch.einsum('md,mn->nd', 
-                                    self.logmap0(self.h(self.expmap0(prev_cb.clone().detach(), 1)),1), 
+                                    self.logmap0(self.h(self.expmap0(prev_cb.clone().detach(),1)),1), 
                                     attention_w)
-            #cb_attn = self.logmap0(cb_attn, 1)
-            d1 = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + \
-            torch.sum(cb_attn**2, dim=1) - 2 * \
-            torch.einsum('bd,dn->bn', z_flattened, rearrange(cb_attn, 'n d -> d n'))
-            min_encoding_indices1 = torch.argmin(d1, dim=1)
+            cb_attnx = self.to_poincare(self.expmap0(cb_attn, 1), 1)
+            zfl = self.to_poincare(self.expmap0(z_flattened,1), 1)
+            dd = self.dist(zfl, cb_attnx)
+            mei = torch.argmin(dd, dim =1)
+            
+            #d1 = torch.sum(z_flattened ** 2, dim=1, keepdim=True) + \
+            #torch.sum(cb_attn**2, dim=1) - 2 * \
+            #torch.einsum('bd,dn->bn', z_flattened, rearrange(cb_attn, 'n d -> d n'))
+            #min_encoding_indices1 = torch.argmin(d1, dim=1)
             #cb_attnp = self.to_poincare(self.h1(self.expmap0(cb_attn, 1)), 1)
-            zn= torch.nn.functional.normalize(cb_attn[min_encoding_indices1]).view(z.shape)
-            z_q2 = cb_attn[min_encoding_indices1].view(z.shape)
+            #zn= torch.nn.functional.normalize(cb_attn[min_encoding_indices1]).view(z.shape)
+            #z_q2 = cb_attn[min_encoding_indices1].view(z.shape)
+            #zn = torch.nn.functional.normalize(cb_attn[min_encoding_indices1]).view(z.shape)
+            z_q2 = self.logmap0(self.to_hyperboloid(cb_attnx[mei], 1),1).view(z.shape)
+            zn =torch.nn.functional.normalize(self.logmap0(self.h1(self.to_hyperboloid(cb_attnx[mei], 1)),1)).view(z.shape)
+            #cb_loss = F.mse_loss(z_q2, z_q2)
+            #print(cb_loss)
             codebookvariance=total_min_distance=hsw = 0
-
+            loss += cb_loss
 
         #  cb_loss = F.mse_loss(z_q, z_q2)
         #else:
@@ -1526,9 +1536,9 @@ class HierarchyTFVQmodulator(nn.Module):
                     num_heads = 4
                     ):
         super(HierarchyTFVQmodulator, self).__init__()
-        #self.norm1 = nn.BatchNorm2d(features, affine=True)
+        self.norm1 = nn.BatchNorm2d(features, affine=True)
         self.nclasses = nclasses
-        self.norm1 = Normalize(features)
+        #self.norm1 = Normalize(features)
 
         self.conv1 = torch.nn.Conv2d(features,
                                        z_channels,
@@ -1537,8 +1547,8 @@ class HierarchyTFVQmodulator(nn.Module):
                                        stride=1,
                                        )
 
-        #self.norm2 = nn.BatchNorm2d(z_channels, affine=True)
-        self.norm2 = Normalize(z_channels)
+        self.norm2 = nn.BatchNorm2d(z_channels, affine=True)
+        #self.norm2 = Normalize(z_channels)
         self.conv2 = torch.nn.Conv2d(z_channels,
                                       z_channels,
                                       kernel_size=3,
@@ -1761,21 +1771,35 @@ class HierarchyVQmodulator(nn.Module):
 
         # modulator layers
         self.norm1 = nn.BatchNorm2d(features, affine=True)
-
+        #self.norm1 = Normalize(features)
+        
         self.conv1 = torch.nn.Conv2d(features,
                                        z_channels,
                                        kernel_size=3,
                                        stride=1,
                                        padding=1
                                        )
-
+        
         self.norm2 = nn.BatchNorm2d(z_channels, affine=True)
+        #self.norm2 = Normalize(z_channels)
+        #self.norm3 = nn.BatchNorm2d(z_channels, affine=True)
+        #self.norm4 = nn.BatchNorm2d(z_channels, affine=True)
         self.conv2 = torch.nn.Conv2d(z_channels,
                                       z_channels,
                                       kernel_size=3,
                                       stride=1,
                                       padding =1,
                                       )
+        """
+        self.conv1 = ResnetBlock2D(in_channels=features,
+                                           out_channels=z_channels,
+                                           dropout=dropout)
+
+        self.conv2 = ResnetBlock2D(in_channels=z_channels,
+                                           out_channels=z_channels,
+                                           dropout=dropout)
+        
+        """
         # ============
 
         self.trim = trim
@@ -1820,7 +1844,7 @@ class HierarchyVQmodulator(nn.Module):
                                     codebooksize[0], 
                                     emb_dim, 
                                     beta=1.0, 
-                                    disentangle=True,
+                                    disentangle=False,
                                     sigma=0.1)
             self.quantize1 = GumbelQuantize2DHS(device, 
                                     codebooksize[1], 
@@ -2037,10 +2061,10 @@ class HierarchyVQmodulator(nn.Module):
             return cb
 
     def forward(self, x):
-        x1 = self.norm1(x)
+        x = self.norm1(x)
         #x1 = nonlinearity(x1)
-        x1 = self.conv1(x1)
-        x2 = self.norm2(x1)
+        x1 = self.conv1(x)
+        x1 = self.norm2(x1)
         x2 = self.conv2(x1)
 
         shape = x2.shape
@@ -2102,12 +2126,12 @@ class HierarchyVQmodulator(nn.Module):
         #attention4b = attention4b[:, torch.abs(attention4b).sum(dim=0) != 0]
         #pd1 = self.dist(prevcb2, cb_attnp2)
         #prevcb3 = self.hp1(self.to_poincare(self.expmap0(prevcb3,1),1))
-        prevcb3 = self.to_poincare(self.hp1(self.expmap0(prevcb3,1)),1)
-        cb_attnp4 = self.to_poincare(self.hp3(self.expmap0(cb_attnp4,1)),1)
-        cb_attnp3 = self.to_poincare(self.hp2(self.expmap0(cb_attnp3,1)),1)
+        prevcb3 = self.to_poincare(self.hp1(self.proj(self.expmap0(prevcb3,1),1)),1)
+        cb_attnp4 = self.to_poincare(self.hp3(self.proj(self.expmap0(cb_attnp4,1),1)),1)
+        cb_attnp3 = self.to_poincare(self.hp2(self.proj(self.expmap0(cb_attnp3,1),1)),1)
         #cb_attnp3b = self.to_poincare(self.hp1(self.expmap0(cb_attnp3b,1)),1)
         #cb_attnp4 = self.hp3(self.to_poincare(self.expmap0(cb_attnp4,1),1))
-        #cb_attnp3p = self.hp2(self.to_poincare(self.expmap0(cb_attnp3p,1),1))
+        #cb_attnp3p = self.hp2(self.to_poincare(self.expmap0(cb_attnp3,1),1))
         #cb_attnp3b = self.hp2(self.to_poincare(self.expmap0(cb_attnp3b,1),1))
 
 
@@ -2154,7 +2178,7 @@ class HierarchyVQmodulator(nn.Module):
                     [z_q1,  z_q3, z_q4],
                     z_q,  
                     [sampled_idx1,  sampled_idx3, sampled_idx4],
-                    ce, td, hrc, r, [ attention3, attention4], [prevcb3, cb_attnp3, cb_attnp4])
+                    ce, td, hrc, r, [attention3, attention4], [prevcb3, cb_attnp3, cb_attnp4])
 
 class VectorQuantizer2DHB(nn.Module):
     """

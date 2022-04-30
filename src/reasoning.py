@@ -120,7 +120,8 @@ class MomentumWithThresholdBinaryOptimizer(Optimizer):
                 #p.data = x 
                 p.data.add_(mask)
                 p.data.abs_()
-               # p.data.div_(2)
+                #p.data.div_(q)
+
         return flips
 
     def zero_grad(self) -> None:
