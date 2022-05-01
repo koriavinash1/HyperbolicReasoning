@@ -2,6 +2,9 @@ import torch
 import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
 from collections import OrderedDict
+import models 
+
+
 model_urls = {
     'stl10': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/STL10/best.pth',
     'afhq': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/AFHQ/best.pth',
@@ -66,24 +69,24 @@ def mnist(n_channel, pretrained=None):
     return model
 
 
-# def stl10(n_channel, pretrained=None):
-#     cfg = [
-#         n_channel, 'M',
-#         2*n_channel, 'M',
-#         4*n_channel, 'M',
-#         4*n_channel, 'M',
-#         (8*n_channel, 0), (8*n_channel, 0), 'M'
-#     ]
-#     layers = make_layers(cfg, batch_norm=True)
-#     model = SVHN(layers, n_channel=32*n_channel, num_classes=10)
-#     if pretrained is not None:
-#         m = torch.load(model_urls['stl10'])
-#         state_dict = m.state_dict() if isinstance(m, nn.Module) else m
-#         assert isinstance(state_dict, (dict, OrderedDict)), type(state_dict)
-#         model.load_state_dict(state_dict)
+def stl10(n_channel, pretrained=None):
+    cfg = [
+        n_channel, 'M',
+        2*n_channel, 'M',
+        4*n_channel, 'M',
+        4*n_channel, 'M',
+        (8*n_channel, 0), (8*n_channel, 0), 'M'
+    ]
+    layers = make_layers(cfg, batch_norm=True)
+    model = SVHN(layers, n_channel=32*n_channel, num_classes=10)
+    if pretrained is not None:
+        m = torch.load(model_urls['stl10'])
+        state_dict = m.state_dict() if isinstance(m, nn.Module) else m
+        assert isinstance(state_dict, (dict, OrderedDict)), type(state_dict)
+        model.load_state_dict(state_dict)
 
-#         print ("STL10 weights loaded ............")
-#     return model
+        print ("STL10 weights loaded ............")
+    return model
 
 # def stl10(n_channel, pretrained=None):
 #     nclass = 10
@@ -97,15 +100,15 @@ def mnist(n_channel, pretrained=None):
 #         print ("STL10 weights loaded ............")
 #     return net
 
-# def afhq(n_channel, pretrained=None):
-#     nclass = 3
-#     net = model.DenseNet121(num_channel=n_channel, classCount=nclass)
-#     if pretrained is not None:
-#         m = torch.load(model_urls['afhq'])
-#         state_dict = m.state_dict() if isinstance(m, nn.Module) else m
-#         assert isinstance(state_dict, (dict, OrderedDict)), type(state_dict)
-#         net.load_state_dict(state_dict)
+def afhq(n_channel, pretrained=None):
+    nclass = 3
+    net = models.DenseNet121(num_channel=n_channel, classCount=nclass)
+    if pretrained is not None:
+        m = torch.load(model_urls['afhq'])
+        state_dict = m.state_dict() if isinstance(m, nn.Module) else m
+        assert isinstance(state_dict, (dict, OrderedDict)), type(state_dict)
+        net.load_state_dict(state_dict)
 
-#         print ("AFHQ weights loaded ............")
-#     return net
+        print ("AFHQ weights loaded ............")
+    return net
 

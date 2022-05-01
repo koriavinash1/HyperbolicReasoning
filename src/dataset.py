@@ -101,7 +101,7 @@ class DataGenerator(data.Dataset):
                                "Supported image extensions are: " + ",".join(IMG_EXTENSIONS)))
 
         self.root = root
-        self.imgs = imgs#[:50]
+        self.imgs = imgs#[:500]
         np.random.shuffle(self.imgs)
         self.classes = classes
         self.num_class = len(classes)
@@ -145,9 +145,9 @@ def get(batch_size,
                 root=os.path.join(data_root, 'training'),
                 transform=transforms.Compose([
                     # affine transformation
-                    transforms.RandomAffine(5, 
-                                    translate=(0.1, 0.1), 
-                                    scale=(0.8, 1.0), shear=0.0),
+                    # transforms.RandomAffine(5, 
+                    #                 translate=(0.1, 0.1), 
+                    #                 scale=(0.8, 1.0), shear=0.0),
                     transforms.Resize(input_size),
                     # transforms.RandomHorizontalFlip(),
                     transforms.ToTensor(),
