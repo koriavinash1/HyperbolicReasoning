@@ -1709,7 +1709,7 @@ class HierarchyVQmodulator(nn.Module):
                                     codebooksize[0], 
                                     emb_dim, 
                                     beta=1.0, 
-                                    disentangle=True,
+                                    disentangle=False,
                                     sigma=0.1)
             self.quantize1 = VectorQuantizer2DHS(device, 
                                     codebooksize[1], 

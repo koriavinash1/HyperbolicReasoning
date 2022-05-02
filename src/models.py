@@ -3,15 +3,12 @@ import torch.nn as nn
 from torchvision import models
 import torch.utils.model_zoo as model_zoo
 import os
-<<<<<<< HEAD
 #from utee import misc
 from collections import OrderedDict
 #print = misc.logger.info
-=======
-from utee import misc
+#from utee import misc
 from collections import OrderedDict
-print = misc.logger.info
->>>>>>> aa244b1e7397dab41d0bbc8b9a17151b19e4d0b1
+#print = misc.logger.info
 
 model_urls = {
     'stl10': 'http://ml.cs.tsinghua.edu.cn/~chenxi/pytorch-models/stl10-866321e9.pth',
@@ -144,7 +141,6 @@ class DenseNet121(nn.Module):
         x= self.classifier(x)
         return x
 
-#===============================================================================================================
 
 class ResNet152(nn.Module):
 
