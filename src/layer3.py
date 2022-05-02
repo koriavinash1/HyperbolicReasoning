@@ -910,7 +910,7 @@ class VectorQuantizer2DHS(nn.Module):
         assert rescale_logits==False, "Only for interface compatible with Gumbel"
         assert return_logits==False, "Only for interface compatible with Gumbel"
         z_flattened = z.view(-1, self.e_dim)
-        #z_flattened = torch.nn.functional.normalize(z_flattened)
+        z_flattened = torch.nn.functional.normalize(z_flattened)
         #z = z_flattened.view(z.shape)
         if (prev_cb is None):       
         # reshape z -> (batch, height, width, channel) and flatten
