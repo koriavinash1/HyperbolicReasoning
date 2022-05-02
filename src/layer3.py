@@ -449,6 +449,118 @@ class VQmodulator(nn.Module):
         return loss, z_q, zqf, ce, td, hrc, r
 
 
+
+class HierarchyVQmodulator1(nn.Module):
+
+    def __init__(self, *, 
+                    features, 
+                    z_channels, 
+                    codebooksize, 
+                    emb_dim,
+                    device,
+                    dropout=0.0, 
+                    nclasses=10,
+                    trim=True):
+        super(HierarchyVQmodulator, self).__init__()
+        self.norm1 = nn.BatchNorm2d(features, affine=True)
+
+        self.conv1 = torch.nn.Conv2d(features,
+                                       z_channels,
+                                       kernel_size=1,
+                                       stride=1,
+                                       )
+
+        self.norm2 = nn.BatchNorm2d(z_channels, affine=True)
+        self.conv2 = torch.nn.Conv2d(z_channels,
+                                      z_channels,
+                                      kernel_size=1,
+                                      stride=1,
+                                      )
+
+        self.trim = trim
+        self.quantize = VectorQuantizer2DHS(device, codebooksize[0], emb_dim, beta=1.0, sigma=0.1)
+
+        self.quantize1 = VectorQuantizer2DHS(device, codebooksize[1], emb_dim, beta=1.0, sigma=0.1)
+
+        self.quantize2 = VectorQuantizer2DHS(device, codebooksize[2], emb_dim, beta=1.0, sigma=0.1)
+
+        self.quantize3 = VectorQuantizer2DHS(device, codebooksize[3], emb_dim, beta=1.0, sigma=0.1)
+        
+        
+        self.q1w = torch.nn.Parameter(torch.ones(emb_dim))
+        self.q2w = torch.nn.Parameter(torch.ones(emb_dim))
+        self.q3w = torch.nn.Parameter(torch.ones(emb_dim))
+        
+
+        self.q1conv = None
+        self.q2conv = None
+        self.q3conv = None
+        if self.trim:
+            self.q1conv = torch.nn.Conv2d(z_channels,
+                                        z_channels//4,
+                                        kernel_size=3,
+                                        padding=1,
+                                        stride=1,
+                                        )
+            self.q2conv = torch.nn.Conv2d(z_channels//4,
+                                        z_channels//8,
+                                        kernel_size=3,
+                                        padding=1,
+                                        stride=1,
+                                        )
+            self.q3conv = torch.nn.Conv2d(z_channels//8,
+                                        1,
+                                        kernel_size=3,
+                                        padding=1,
+                                        stride=1,
+                                        )
+
+        # self.BottleneckMLP = BottleneckMLP(input = input, hiddendim = hiddendim)
+
+        self.z_channels = z_channels
+        self.emb_dim = emb_dim 
+
+    def attention(self, input_,  w, x, conv=None):
+        print (input_.shape, x.shape, w.shape)
+        x = input_ + (w * x.view(-1, self.emb_dim)).view(x.shape)
+
+        if not (conv is None):
+            x = conv(x)
+        return x
+
+    def forward(self, x):
+        x1 = self.norm1(x)
+        #x1 = nonlinearity(x1)
+        x1 = self.conv1(x1)
+        x2 = self.norm2(x1)
+        x2 = self.conv2(x1)
+
+        shape = x2.shape
+        assert self.emb_dim == shape[2]*shape[3]
+
+        z_q1, loss1, sampled_idx1, ce1, td1, hrc1, r1 = self.quantize(x2)
+        z_q1_attn = self.attention(x2, self.q1w, z_q1, self.q1conv)
+
+        z_q2, loss2, sampled_idx2, ce2, td2, hrc2, r2 = self.quantize1(z_q1_attn)
+        z_q2_attn = self.attention(z_q1_attn, self.q2w, z_q2, self.q2conv)
+
+        z_q3, loss3, sampled_idx3, ce3, td3, hrc3, r3 = self.quantize2(z_q2_attn)
+        z_q3_attn = self.attention(z_q2_attn, self.q3w, z_q3, self.q3conv)
+
+        z_q4, loss4, sampled_idx4, ce4, td4, hrc4, r4 = self.quantize3(z_q3_attn)
+
+        loss = 0.25*(loss1 + loss2 + loss3 + loss4)
+        ce = 0.25*(ce1 + ce2 + ce3 + ce4) 
+        td = 0.25*(td1 + td2 + td3 + td4) 
+        hrc = 0.25*(hrc1 + hrc2 + hrc3 + hrc4) 
+        r = 0.25*(r1 + r2 + r3 + r4)
+
+        return (loss, 
+                    [z_q1, z_q2, z_q3, z_q4],  
+                    [sampled_idx1, sampled_idx2, sampled_idx3, sampled_idx4],
+                    ce, td, hrc, r)
+
+
 class Clamp(torch.autograd.Function):
     @staticmethod
     def forward(ctx, input):
@@ -910,7 +1022,7 @@ class VectorQuantizer2DHS(nn.Module):
         assert rescale_logits==False, "Only for interface compatible with Gumbel"
         assert return_logits==False, "Only for interface compatible with Gumbel"
         z_flattened = z.view(-1, self.e_dim)
-        z_flattened = torch.nn.functional.normalize(z_flattened)
+        #z_flattened = torch.nn.functional.normalize(z_flattened)
         #z = z_flattened.view(z.shape)
         if (prev_cb is None):       
         # reshape z -> (batch, height, width, channel) and flatten
@@ -1412,8 +1524,6 @@ class HierarchyTFVQmodulatorCW(nn.Module):
         r = torch.mean(r1)#0.25*(r1 + r2 + r3 + r4)
 
         return loss, z_q4, z_q1, ce, td, hrc, r, z_q4t, [i1, i2, i3, i4]
-
-
 class HierarchyTFVQmodulator(nn.Module):
 
     def __init__(self, *, 
@@ -1639,9 +1749,6 @@ class weightConstraint3(object):
             w=module.weight.data
             x = w.shape[1]
             module.weight.data=w/8
-
-
-
 class HierarchyVQmodulator(nn.Module):
 
     def __init__(self, *, 
@@ -1768,9 +1875,9 @@ class HierarchyVQmodulator(nn.Module):
         self.q2conv = torch.nn.Linear(z_channels, z_channels)
         self.q3conv = torch.nn.Linear(z_channels, z_channels)
         """
-        self.q1conv = nn.Linear(z_channels,z_channels)
-        #self.q2conv = nn.Linear(z_channels, z_channels)
-        self.q3conv = nn.Linear(z_channels, z_channels)
+        self.q1conv = BinaryLinear(z_channels,z_channels)
+        #self.q2conv = BinaryLinear(z_channels, z_channels)
+        self.q3conv = BinaryLinear(z_channels, z_channels)
         
         self.h =  HNNLayer(emb_dim, emb_dim, 1, 0, True )
         self.h2 =  HNNLayer(emb_dim, emb_dim, 1, 0, True )

@@ -108,7 +108,6 @@ def afhq(n_channel, pretrained=None):
         state_dict = m.state_dict() if isinstance(m, nn.Module) else m
         assert isinstance(state_dict, (dict, OrderedDict)), type(state_dict)
         net.load_state_dict(state_dict)
-        print("AFHQ weights loaded ............")
+
+        print ("AFHQ weights loaded ............")
     return net
-        #print("AFHQ weights loaded ............")
-    #return net
