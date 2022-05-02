@@ -44,10 +44,8 @@ IMG_EXTENSIONS = ['.tif','.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm']
 
 def is_image_file(filename):
     """Checks if a file is an image.
-
     Args:
         filename (string): path to a file
-
     Returns:
         bool: True if the filename ends with a known image extension
     """
@@ -75,7 +73,6 @@ def make_dataset(dir, class_to_idx):
 
 class DataGenerator(data.Dataset):
     """
-
     Args:
         root (string): Root directory path.
         transform (callable, optional): A function/transform that  takes in an PIL image
@@ -83,7 +80,6 @@ class DataGenerator(data.Dataset):
         target_transform (callable, optional): A function/transform that takes in the
             target and transforms it.
         loader (callable, optional): A function to load an image given its path.
-
      Attributes:
         classes (list): List of the class names.
         class_to_idx (dict): Dict with items (class_name, class_index).
@@ -101,7 +97,7 @@ class DataGenerator(data.Dataset):
                                "Supported image extensions are: " + ",".join(IMG_EXTENSIONS)))
 
         self.root = root
-        self.imgs = imgs#[:50]
+        self.imgs = imgs#[:500]
         np.random.shuffle(self.imgs)
         self.classes = classes
         self.num_class = len(classes)
@@ -114,7 +110,6 @@ class DataGenerator(data.Dataset):
         """
         Args:
             index (int): Index
-
         Returns:
             tuple: (image, target) where target is class_index of the target class.
         """
@@ -145,9 +140,9 @@ def get(batch_size,
                 root=os.path.join(data_root, 'training'),
                 transform=transforms.Compose([
                     # affine transformation
-                    transforms.RandomAffine(5, 
-                                    translate=(0.1, 0.1), 
-                                    scale=(0.8, 1.0), shear=0.0),
+                    # transforms.RandomAffine(5, 
+                    #                 translate=(0.1, 0.1), 
+                    #                 scale=(0.8, 1.0), shear=0.0),
                     transforms.Resize(input_size),
                     # transforms.RandomHorizontalFlip(),
                     transforms.ToTensor(),

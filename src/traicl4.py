@@ -6,7 +6,7 @@ from torch import nn
 import fire
 import json
 from layer3 import DiscAE, DiscClassifier, Decoder, VQmodulator,  HierarchyVQmodulator
-from clsmodel import mnist #, afhq, stl10
+from clsmodel import mnist, afhq#, stl10
 from torch.optim import Adam, SGD
 import numpy as np
 from dataset import get
@@ -90,7 +90,7 @@ class Trainer():
                     batch_size = 10,
                     nepochs = 20,
                     sigma=0.1,
-                    learning_rate = 2e-5,
+                    learning_rate = 1e-3,
                     num_workers =  None,
                     save_every = 'best',
                     aug_prob = 0.,
@@ -108,6 +108,7 @@ class Trainer():
                     num_res_blocks = 1,
                     dropout=0.0,
                     resamp_with_conv=True,
+                    inchannels_codebook = 64,
                     in_channels =3,
                     hiddendim = 64,
                     log = False,
@@ -123,6 +124,7 @@ class Trainer():
         self.style_depth = style_depth
         self.seed = seed
         self.nclasses = nclasses
+        self.out = out_ch
 
         map = lambda x, y: [x[i]//y[-1] for i in range(len(x))]
         self.latentdim = [self.latent_size]+map(image_size, ch_mult)
@@ -136,7 +138,7 @@ class Trainer():
         self.input_size = image_size
         self.num_workers = num_workers
 
-        self.given_channels = 64
+        self.given_channels = inchannels_codebook
         self.required_channels = latent_dim
         self.trim = trim 
         self.combine = combine 
@@ -151,8 +153,10 @@ class Trainer():
 
         with torch.no_grad():
             self.feature_extractor = classifier.features.to(self.device).eval()
-            self.classifier_baseline = classifier.classifier.to(self.device).eval()
-            for p in self.classifier_baseline.parameters(): p.requires_grad = False 
+            self.classifier_baseline_ = classifier.classifier.to(self.device).eval()
+            self.classifier_baseline = lambda x: self.classifier_baseline_(nn.functional.adaptive_avg_pool2d(x,(1,1)).view(x.size(0),-1)) 
+
+            for p in self.classifier_baseline_.parameters(): p.requires_grad = False 
             for p in self.feature_extractor.parameters(): p.requires_grad = False 
         
 
@@ -180,15 +184,16 @@ class Trainer():
         self.inchannel = self.latent_size #self.emb_dim  if (self.trim and not self.combine) else np.prod(self.latentdim)      
         #self.inchannel = self.emb_dim  if (self.trim and not self.combine) else np.prod(self.latentdim)
         clfq = []
-        clfq.append(nn.Linear(self.inchannel, self.nclasses ))
+        clfq.append(nn.Linear(self.inchannel, 128 ))
+        clfq.append(nn.Linear(128,self.out))
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
 
 
         # Optimizers
         
         self.opt = Adam(list(self.modelclass.other_parameters()) + \
-                        list(self.classifier_quantized.parameters()),
-                        lr=self.lr)
+                         list(self.classifier_quantized.parameters()),
+                         lr=self.lr)
             
         self.opt1 = MomentumWithThresholdBinaryOptimizer(
                          list(self.modelclass.reasoning_parameters()),
@@ -222,7 +227,7 @@ class Trainer():
 
         # number of parameters
         print ('FeatureExtractor: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.feature_extractor.parameters() if p.requires_grad), sum(p.numel() for p in self.feature_extractor.parameters())))
-        print ('ContiClassifier: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.classifier_baseline.parameters() if p.requires_grad), sum(p.numel() for p in self.classifier_baseline.parameters())))
+        print ('ContiClassifier: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.classifier_baseline_.parameters() if p.requires_grad), sum(p.numel() for p in self.classifier_baseline_.parameters())))
         print ('codebook: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.modelclass.parameters() if p.requires_grad), sum(p.numel() for p in self.modelclass.parameters())))
         print ('DisClassifier: Total number of trainable params: {}/{}'.format(sum(p.numel() for p in self.classifier_quantized.parameters() if p.requires_grad), sum(p.numel() for p in self.classifier_quantized.parameters())))
  
@@ -263,7 +268,7 @@ class Trainer():
             data = Variable(data.to(self.device))
             m = nn.Softmax(dim=1)
 
-            #self.opt.zero_grad()
+            self.opt.zero_grad()
             self.opt1.zero_grad()
             self.opt2.zero_grad()
 
@@ -272,7 +277,7 @@ class Trainer():
             with torch.no_grad():
                 f = self.feature_extractor(data)
                 features1 = f.view(f.size(0), -1)
-                conti_target = m(self.classifier_baseline(features1))
+                conti_target = m(self.classifier_baseline(f))
                 conti_target = torch.argmax(conti_target, 1)
                     
 
@@ -285,8 +290,8 @@ class Trainer():
             else:
                 decoder_features = classifier_features = features
             classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
-            #classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1] * classifier_features.shape[2]*classifier_features.shape[3])
-            #print(classifier_features.shape)
+            # classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1] * classifier_features.shape[2]*classifier_features.shape[3])
+            # [print(f.shape) for f in features]
             dis_target = m(self.cq(classifier_features))
             class_loss_ = ce_loss(logits = dis_target, target = conti_target)
 
@@ -295,7 +300,7 @@ class Trainer():
             loss.backward()
             # print (torch.mean(self.modelclass.rattn3.weight.grad), torch.std(self.modelclass.rattn3.weight.grad))
             #self.opt1.step()            
-            #self.opt.step()
+            self.opt.step()
             self.opt1.step()
             #print (self.modelclass.rattn3.weight)
             #print (self.modelclass.rattn2.weight)
@@ -334,7 +339,7 @@ class Trainer():
         mean_loss = []; mean_recon_loss_ = []
         mean_f1_score = []; mean_acc_score = []
 
-
+        plot = False 
         for batch_idx, (data, _) in enumerate(val_loader):
 
             data = Variable(data.to(self.device))
@@ -345,7 +350,7 @@ class Trainer():
             with torch.no_grad():
                 features = self.feature_extractor(data)
                 features1 = features.view(features.size(0), -1)
-                conti_target = m(self.classifier_baseline(features1))
+                conti_target = m(self.classifier_baseline(features))
                 conti_target = torch.argmax(conti_target, 1)
 
             #wc = weightConstraint()
@@ -433,14 +438,14 @@ class Trainer():
         min_loss = np.inf
         min_recon = np.inf
 
-
+        plot = False
 
         for iepoch in range(self.nepochs):
 
             self.training_step(train_loader, iepoch)
             loss, rloss, f1, acc, attnblocks, codebooks= self.validation_step(valid_loader, iepoch)
 
-            if iepoch==48:
+            if plot and (iepoch==40):
                 for i in range(len(attnblocks)):
                     att = attnblocks[i].cpu().numpy()
                     cb1 = codebooks[i].cpu().numpy()
@@ -462,7 +467,7 @@ class Trainer():
                                     #               else:
               #                  plt.plot(x, y)
 
-            plt.savefig('/vol/biomedic3/as217/GeometricSymbolicAI/SymbolicInterpretability/SymbolicInterpretability/src/images/poincaretesthacksphere.png')
+                plt.savefig('poincaretesthacksphere.png')
                   
 
             stats = {'loss': loss, 'f1': f1, 'acc': acc, 'rloss': rloss}
@@ -516,10 +521,23 @@ class Trainer():
         pass
 
 
-def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNISTv0/TI/data',
+def train_from_folder(\
+                    #   data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNISTv0/TI/data',
+                    #   logs_root='../logs',
+                    #   name='default4',
+                    #   image_size=(32,32),
+                    #   codebook_length = 32,
+                    #   latent_dim=32,
+                    #   in_channels_codebook = 64,
+                    #   ch_mult=(1, 2, 4, 8),
+                      data_root='/vol/biomedic2/agk21/PhDLogs/datasets/AFHQ/afhq',
                       logs_root='../logs',
-                      name='default4',
-                      image_size=(32,32),
+                      name='default4AFHQ',
+                      image_size=(128,128),
+                      codebook_length = 256,
+                      latent_dim=64,
+                      in_channels_codebook = 1024,
+                      ch_mult=(1, 2, 4, 8, 16, 32),
                       style_depth=16,
                       batch_size=50,
                       nepochs=50,
@@ -535,11 +553,9 @@ def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNI
                       pl_weightage=1.0,
                       seed=42,
                       nclasses=10,
-                      latent_dim=32,
                       log=True,
                       ch=32,
                       out_ch=3,
-                      ch_mult=(1, 2, 4, 8),
                       num_res_blocks = 1,
                       dropout=0.0,
                       resamp_with_conv=True,
@@ -551,6 +567,8 @@ def train_from_folder(data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNI
         logs_root=logs_root,
         name=name,
         image_size=image_size,
+        codebook_length = codebook_length,
+        inchannels_codebook = in_channels_codebook,
         style_depth=style_depth,
         batch_size=batch_size,
         nepochs=nepochs,

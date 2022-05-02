@@ -2147,7 +2147,10 @@ class HierarchyVQmodulator(nn.Module):
         #ploss = (torch.sum(attention2 * pd1) + torch.sum(attention3 * pd2) + torch.sum(attention4 * pd3))/ \
         #(torch.sum( (attention2b)*pd1) + torch.sum((attention3b)*pd2) + torch.sum((attention4b)*pd3) + torch.sum(pd4) + torch.sum(pd5) +torch.sum(pd6))
         ploss =  (torch.sum(attention3 * pd2) + torch.sum(attention4 * pd3))/ \
-        ( torch.sum((attention3b)*pd2) + torch.sum((attention4b)*pd3)  +torch.sum(pd6)+ torch.sum(pd1s) + torch.sum(pd2s) + torch.sum(pd3s))
+        (torch.sum((attention3b)*pd2) + torch.sum((attention4b)*pd3)  +torch.sum(pd6)+ torch.sum(pd1s) + torch.sum(pd2s)*4 + torch.sum(pd3s))
+        #ploss = (torch.sum(attention3 * pd2)) / (torch.sum((attention3b)*pd2) + torch.sum(pd6)+ torch.sum(pd1s) + torch.sum(pd2s)) + \
+         #       (torch.sum(attention4 * pd3))/ (torch.sum((attention4b)*pd3) + torch.sum(pd2s) + torch.sum(pd3s))
+
         #print(attention3)
         #(torch.sum( (1-attention2)*pd1) + torch.sum((1-attention3)*pd2) + torch.sum((1-attention4)*pd3) + torch.sum(pd4) + torch.sum(pd5) +torch.sum(pd6))
         #(torch.sum( (attention2b)*pd1) + torch.sum((attention3b)*pd2) + torch.sum((attention4b)*pd3) + torch.sum(pd4) + torch.sum(pd5) +torch.sum(pd6))

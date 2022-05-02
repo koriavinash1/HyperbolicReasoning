@@ -1,11 +1,13 @@
 {
-    "data_root": "/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNISTv0/TI/data",
-    "logs_root": "../logs/default4",
-    "name": "default4",
+    "data_root": "/vol/biomedic2/agk21/PhDLogs/datasets/AFHQ/afhq",
+    "logs_root": "../logs/default4AFHQ",
+    "name": "default4AFHQ",
     "image_size": [
-        32,
-        32
+        128,
+        128
     ],
+    "codebook_length": 256,
+    "inchannels_codebook": 1024,
     "style_depth": 16,
     "batch_size": 50,
     "nepochs": 50,
@@ -21,7 +23,7 @@
     "pl_weightage": 1.0,
     "seed": 42,
     "nclasses": 10,
-    "latent_dim": 32,
+    "latent_dim": 64,
     "log": true,
     "ch": 32,
     "out_ch": 3,
@@ -29,7 +31,9 @@
         1,
         2,
         4,
-        8
+        8,
+        16,
+        32
     ],
     "num_res_blocks": 1,
     "dropout": 0.0,
