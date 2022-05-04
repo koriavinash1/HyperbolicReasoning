@@ -184,8 +184,8 @@ class Trainer():
         self.inchannel = self.latent_size #self.emb_dim  if (self.trim and not self.combine) else np.prod(self.latentdim)      
         #self.inchannel = self.emb_dim  if (self.trim and not self.combine) else np.prod(self.latentdim)
         clfq = []
-        clfq.append(nn.Linear(self.inchannel, 128 ))
-        clfq.append(nn.Linear(128,self.out))
+        clfq.append(nn.Linear(self.inchannel, self.out ))
+        #clfq.append(nn.Linear(128,self.out))
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
 
 
@@ -268,7 +268,7 @@ class Trainer():
             data = Variable(data.to(self.device))
             m = nn.Softmax(dim=1)
 
-            self.opt.zero_grad()
+            #self.opt.zero_grad()
             self.opt1.zero_grad()
             self.opt2.zero_grad()
 
@@ -300,7 +300,7 @@ class Trainer():
             loss.backward()
             # print (torch.mean(self.modelclass.rattn3.weight.grad), torch.std(self.modelclass.rattn3.weight.grad))
             #self.opt1.step()            
-            self.opt.step()
+            #self.opt.step()
             self.opt1.step()
             #print (self.modelclass.rattn3.weight)
             #print (self.modelclass.rattn2.weight)
@@ -438,14 +438,14 @@ class Trainer():
         min_loss = np.inf
         min_recon = np.inf
 
-        plot = False
+        plot = True
 
         for iepoch in range(self.nepochs):
 
             self.training_step(train_loader, iepoch)
             loss, rloss, f1, acc, attnblocks, codebooks= self.validation_step(valid_loader, iepoch)
 
-            if plot and (iepoch==40):
+            if plot and (iepoch==30):
                 for i in range(len(attnblocks)):
                     att = attnblocks[i].cpu().numpy()
                     cb1 = codebooks[i].cpu().numpy()
@@ -467,7 +467,7 @@ class Trainer():
                                     #               else:
               #                  plt.plot(x, y)
 
-                plt.savefig('poincaretesthacksphere.png')
+                plt.savefig('/vol/biomedic3/as217/GeometricSymbolicAI/SymbolicInterpretability/SymbolicInterpretability/src/images/poincaretesthacksphere.png')
                   
 
             stats = {'loss': loss, 'f1': f1, 'acc': acc, 'rloss': rloss}
@@ -534,8 +534,8 @@ def train_from_folder(\
                       logs_root='../logs',
                       name='default4AFHQ',
                       image_size=(128,128),
-                      codebook_length = 256,
-                      latent_dim=64,
+                      codebook_length = 128,
+                      latent_dim=32,
                       in_channels_codebook = 1024,
                       ch_mult=(1, 2, 4, 8, 16, 32),
                       style_depth=16,
@@ -552,7 +552,7 @@ def train_from_folder(\
                       hessian_weightage=1.0,
                       pl_weightage=1.0,
                       seed=42,
-                      nclasses=10,
+                      nclasses=3,
                       log=True,
                       ch=32,
                       out_ch=3,
