@@ -12,58 +12,81 @@ import torch.distributed as dist
 import numpy as np
 
 
-def train_from_folder(data_root = './data',
-    logs_root ='./logs/',
-    name = 'default',
-    image_size = 128,
-    style_depth = 16,
-    batch_size = 5,
-    nepochs = 150000,
-    learning_rate = 2e-4,
-    num_workers =  None,
-    save_every = 1000,
-    aug_prob = 0.,
-    recon_loss_weightage = 1.0,
-    disentangle_weightage = 1.0,
-    quantization_weightage = 1.0,
-    hessian_weightage = 1.0,
-    pl_weightage = 1.0,
-    seed = 42,
-    nclasses=10,
-    latent_dim=512,
-    featurelen=1024,
-    encoder=False,
-    log = False,
-):
+def train_from_folder(\
+                    #   data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNISTv0/TI/data',
+                    #   logs_root='logs',
+                    #   name='MNIST',
+                    #   image_size=(32,32),
+                    #   codebook_size = [64, 32, 10],
+                    #   latent_dim=32,
+                    #   in_channels_codebook = 64,
+                    #   batch_size=50,
+                    #   ch_mult=(1, 2, 4, 8),
+                    #   nclasses=10,
+                    #   avg_pool=False,
+                    #   ch=32,
+                    #   num_res_blocks = 1,
+
+                      codebook_size = [128, 32, 3],
+                      name='AFHQ',
+                      data_root='/vol/biomedic2/agk21/PhDLogs/datasets/AFHQ/afhq',
+                      logs_root='../logs',
+                      image_size=(128,128),
+                      batch_size=15,
+                      latent_dim=512,
+                      in_channels_codebook = 1024,
+                      ch_mult=(1, 2, 4, 8, 16, 32),
+                      nclasses=3,
+                      ch=32,
+                      num_res_blocks = 1,
+                      avg_pool=True,
+
+
+                      nepochs=100,
+                      learning_rate=2e-4,
+                      decoder_learning_rate=2e-4,
+                      num_workers=10,
+                      sigma = 0.1,
+                      seed=42,
+                      log=True,
+                      resamp_with_conv=True,
+                      in_channels =3,
+                      trim=False,
+                      combine=False,
+                      reasoning=True
+                      ):
+
     model_args = dict(
-        data_root =data_root,
-        logs_root =logs_root,
-        name = name,
-        image_size = image_size,
-        style_depth = style_depth,
-        batch_size = batch_size,
-        nepochs = nepochs,
-        learning_rate = learning_rate,
-        num_workers =  num_workers,
-        save_every = save_every,
-        aug_prob = aug_prob,
-        recon_loss_weightage = recon_loss_weightage,
-        disentangle_weightage = disentangle_weightage,
-        quantization_weightage = quantization_weightage,
-        hessian_weightage = hessian_weightage,
-        pl_weightage = pl_weightage,
-        seed = seed,
-        nclasses = nclasses,
-        latent_dim = latent_dim,
-        featurelen = featurelen,
-        encoder = encoder,
-        log = log,
+        data_root=data_root,
+        logs_root=logs_root,
+        image_size=image_size,
+        codebook_size = codebook_size,
+        inchannels_codebook = in_channels_codebook,
+        batch_size=batch_size,
+        nepochs=nepochs,
+        learning_rate=learning_rate,
+        decoder_learning_rate = decoder_learning_rate,
+        num_workers=num_workers,
+        sigma= sigma,
+        seed=seed,
+        nclasses=nclasses,
+        latent_dim=latent_dim,
+        log=log,
+        ch=ch,
+        ch_mult=ch_mult,
+        num_res_blocks=num_res_blocks,
+        resamp_with_conv=resamp_with_conv,
+        in_channels=in_channels,
+        trim = trim,
+        avg_pool=avg_pool,
+        combine=combine,
+        reasoning=reasoning
     )
 
     os.makedirs(os.path.join(logs_root, name), exist_ok=True)
+    model_args['logs_root'] = os.path.join(logs_root, name)
     with open(os.path.join(logs_root, name, 'exp-config.json'), 'w') as f:
-        json.dump(model_args, f, indent = 4)
-    
+        json.dump(model_args, f, indent=4)
 
     if data_root.lower().__contains__('mnist'):
         if data_root.__contains__('TSWIv2'):
@@ -84,13 +107,13 @@ def train_from_folder(data_root = './data',
         net = afhq(3, True)
     else:
         raise ValueError("explainee model not found")
-        
+
     model_args['classifier'] = net
+
+
 
     trainer = Trainer(**model_args)
     trainer.train()
-
-
 
 if __name__ == '__main__':
     fire.Fire(train_from_folder)

@@ -2,8 +2,7 @@ import torch
 import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
 from collections import OrderedDict
-import models 
-
+import src.models as models
 
 model_urls = {
     'stl10': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/STL10/best.pth',

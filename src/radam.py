@@ -1,5 +1,5 @@
 import torch.optim
-from manifolds import Euclidean, ManifoldParameter
+from src.manifolds import Euclidean, ManifoldParameter
 
 # in order not to create it at each iteration
 _default_manifold = Euclidean()

@@ -54,7 +54,7 @@ class MomentumWithThresholdBinaryOptimizer(Optimizer):
         self,
         binary_params,
         bn_params,
-        ar: float = 0.0001,
+        ar: float = 0.001,
         threshold: float = 0,
         adam_lr=0.001,
     ):
@@ -108,18 +108,21 @@ class MomentumWithThresholdBinaryOptimizer(Optimizer):
 
                 mask = (m.abs() >= t) * (m.sign() == p.sign())
                 mask = mask.double() * -1
-                mask[mask == 0] =0
-               # mask[mask == -1] = 0
+               
+
                 flips[param_idx] = (mask == -1).sum().item()
                 #p.data = (p.data + mask)**2
-                #p.data =torch.heaviside(p.data, torch.tensor([0.0]).to(device))
+                # p.data =torch.heaviside(p.data, torch.tensor([0.0]).to(device))
                 #x[x>0] = 1
-                q = torch.sum(p.data, 0)
-                q = q.repeat(p.data.shape[0], 1)
-                q[q==0] = 1
+
+                # q = torch.sum(p.data, 0)
+                # q = q.repeat(p.data.shape[0], 1)
+                # q[q==0] = 1
+
                 #p.data = x 
                 p.data.add_(mask)
                 p.data.abs_()
+
                 #p.data.div_(q)
 
         return flips

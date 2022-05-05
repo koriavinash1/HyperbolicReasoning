@@ -1,6 +1,7 @@
 from torch.nn import Parameter
-from mathutils import artanh, tanh
+from src.mathutils import artanh, tanh
 import torch
+
 class Manifold(object):
     """
     Abstract class to define operations on a manifold.
