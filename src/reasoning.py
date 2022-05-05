@@ -115,15 +115,14 @@ class MomentumWithThresholdBinaryOptimizer(Optimizer):
                 # p.data =torch.heaviside(p.data, torch.tensor([0.0]).to(device))
                 #x[x>0] = 1
 
-                # q = torch.sum(p.data, 0)
-                # q = q.repeat(p.data.shape[0], 1)
-                # q[q==0] = 1
+                q = torch.sum(p.data, 0)
+                q = q.repeat(p.data.shape[0], 1)
+                q[q==0] = 1
 
                 #p.data = x 
                 p.data.add_(mask)
                 p.data.abs_()
-
-                #p.data.div_(q)
+                p.data.div_(q)
 
         return flips
 

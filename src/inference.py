@@ -1,3 +1,4 @@
+from lib2to3.pygram import Symbols
 from importlib_metadata import distribution
 import numpy as np
 import os
@@ -7,6 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import itertools
 from scipy import stats
+from tqdm import tqdm
 
 
 # from src.Lib.ILPRLEngine import *
@@ -238,6 +240,7 @@ class InductiveReasoningDT(object):
                     ncodebook_features,
                     nclasses,
                     feature_extractor = None,
+                    train_loader = None,
                     codebook = None,
                     classifier = None,
                     decoder = None,
@@ -251,6 +254,7 @@ class InductiveReasoningDT(object):
         self.Xdata = data[0]
         self.Ydata = data[1]
         self.device = device
+        self.threshold = 0.1
 
         # if isinstance(ncodebook_features, list):
         #     assert self.ncodebook_features[-1] == self.nclasses, "reasoning block count mismatch"
@@ -272,6 +276,11 @@ class InductiveReasoningDT(object):
         os.makedirs(os.path.join(self.logs_root, 'Logs'), exist_ok=True)
 
         self.nx_graph = self.define_nx_graph()
+        print (self.nx_graph.number_of_edges())
+        if not (train_loader is None):
+            self.filter_grpah(train_loader)
+            print (self.nx_graph.number_of_edges())
+
         self.vsemantics = visualSemantics(decoder=decoder,
                                         reasoning_graph=self.nx_graph,
                                         feature_extractor=self.feature_extractor,
@@ -324,20 +333,18 @@ class InductiveReasoningDT(object):
         # add edges
         for i in range(len(layers)):
             weight = layers[i].weight.T
-            t = torch.max(weight)*0.8
-            print (torch.sum(weight > t))
             for j in range(weight.shape[0]):
                 for k in range(weight.shape[1]):
-                    if weight[j][k].item() > t:
+                    if weight[j][k].item() == 1:
                         G.add_edge(f'Cb^{i}_{j}', 
                                     f'Cb^{i+1}_{k}', 
                                     weight=1)
 
 
         # filter graph 
-        # for node in G.nodes:
-        #     if (G.out_degree(node) == 0) and (G.in_degree(node) == 0):
-        #         G.remove_node(node)
+        for node in G.nodes:
+            if (G.out_degree(node) == 0) and (G.in_degree(node) == 0):
+                G.remove_node(node)
 
         # pos_ = nx.multipartite_layout(G, scale=2000)
         pos_ = nx.multipartite_layout(G, subset_key='layer', scale=2000)
@@ -345,10 +352,33 @@ class InductiveReasoningDT(object):
         return G
     
 
+    def filter_grpah(self, train_loader):
+        sampled_symbols = {i:[] for i in range(len(self.ncodebook_features))}
+
+        for i, (xdata, ydata, *_) in tqdm(enumerate(train_loader)):
+            if i > 1000: break
+            symbols,  _, _ = self.forward(xdata.cuda(0))
+            for i in range(len(symbols)):
+                sampled_symbols[i].extend(symbols[i])
+        
+
+        for k, v in sampled_symbols.items():
+            s = np.array(v).flatten()
+            mode = stats.mode(s)
+            mode_count = np.sum(s == mode)
+            unique = np.unique(s)
+            for us in unique:
+                us_count = np.sum(s == us)
+                if us_count < self.threshold * mode_count:
+                    node = f'Cb^{k}_{us}'
+                    if node in list(self.nx_graph.nodes):
+                        self.nx_graph.remove_node(node)
+
+
     def get_class_symbol(self, class_idx):
-        xbatch = self.Xdata[self.Ydata == class_idx][:10]
+        xbatch = self.Xdata[self.Ydata == class_idx]
         sampled_symbols, y, sampled_features = self.forward(xbatch)
-        filtered_symbols = (sampled_symbols[-1])[y == class_idx].flatten()
+        filtered_symbols = (sampled_symbols[-1])[y == class_idx].flatten() #TODO: filtering
         mode = stats.mode(filtered_symbols)
         mode_count = np.sum(filtered_symbols == mode)
         return_symbols = []
@@ -366,9 +396,8 @@ class InductiveReasoningDT(object):
         G.add_node(self.class_mapping[class_idx], layer= max_layers)
 
         class_symbols = self.get_class_symbol(class_idx)
-        
         node_names = [f'Cb^{len(self.ncodebook_features)-1}_{class_symbol}' for class_symbol in class_symbols]
-        
+
         
         for node in node_names:
             G.add_node(node, layer=max_layers - 1)
@@ -386,6 +415,12 @@ class InductiveReasoningDT(object):
 
             node_names = new_nodes
         
+
+        # filter graph 
+        for node in G.nodes:
+            if (G.out_degree(node) == 0) and (G.in_degree(node) == 0):
+                G.remove_node(node)
+
         pos_ = nx.multipartite_layout(G, subset_key='layer', scale=2000)
         nx.draw(G, pos_, edge_color='b', width=1, with_labels = True, arrows=True, arrowsize=20, node_size=1000) 
         return G
@@ -408,7 +443,6 @@ class InductiveReasoningDT(object):
             G.add_edge(node, self.class_mapping[class_idx], weight=1)
 
 
-
         sampled_symbols = sampled_symbols[:-1]
         for i, layer_symbols in enumerate(sampled_symbols[::-1]):
             layer_symbols = np.unique(layer_symbols[0])
@@ -423,6 +457,13 @@ class InductiveReasoningDT(object):
 
             node_names = new_nodes
         
+
+        # filter graph 
+        for node in G.nodes:
+            if (G.out_degree(node) == 0) and (G.in_degree(node) == 0):
+                G.remove_node(node)
+
+
         pos_ = nx.multipartite_layout(G, subset_key='layer', scale=2000)
         nx.draw(G, pos_, edge_color='b', width=1, with_labels = True, arrows=True, arrowsize=20, node_size=1000) 
         return G
