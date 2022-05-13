@@ -9,7 +9,7 @@ import pickle
 import networkx as nx
 import torch.nn.functional as F
 import plotly.graph_objects as go
-import networkx as nx
+
 
 
 class visualSemantics(object):
@@ -53,7 +53,7 @@ class visualSemantics(object):
         for i in range(symbols.shape[0]):
             feature_clone[i, np.where(symbols[i])[0], :, :] = 0
         x = self.recon(feature_clone)
-        return (xorig - x)
+        return (xorig[:,0,...] - x[:,0,...])
 
     def mask(self, effect):
         return 1.*(effect > self.threshold)
@@ -80,7 +80,7 @@ class visualSemantics(object):
             return set(parents)
 
 
-        root_symbols = [int(s.split('_')[-1]) for s in find_root(node_name)]
+        root_symbols = [int(s.split('_')[-1][1:-2]) for s in find_root(node_name)]
         
         features, feature_idxs = self.forward(x)
 

@@ -37,7 +37,23 @@ import operator
 import scipy.signal
 
 import networkx as nx
+from networkx.drawing.nx_pydot import graphviz_layout
 
+from matplotlib.colors import LinearSegmentedColormap
+
+def get_transparent_cmap(cmap):
+    # get colormap
+    ncolors = 256
+    color_array = plt.get_cmap(cmap)(range(ncolors))
+
+    # change alpha values
+    color_array[:,-1] = np.linspace(0.0,1.0,ncolors)
+
+    # create a colormap object
+    map_object = LinearSegmentedColormap.from_list(name=cmap, colors=color_array)
+
+
+    return map_object
 
 class SymbolExtractor(object):
     def __init__(self,
@@ -254,7 +270,7 @@ class InductiveReasoningDT(object):
         self.Xdata = data[0]
         self.Ydata = data[1]
         self.device = device
-        self.threshold = 0.1
+        self.threshold = 0.3
 
         # if isinstance(ncodebook_features, list):
         #     assert self.ncodebook_features[-1] == self.nclasses, "reasoning block count mismatch"
@@ -321,11 +337,11 @@ class InductiveReasoningDT(object):
             weight = layers[i].weight.T
            
             for j in range(weight.shape[0]):
-                G.add_node(f'Cb^{i}_{j}', layer= i+1)
+                G.add_node(f'$\zeta^{{{i}}}_{{{j}}}$', layer= i+1)
                 total_nodes +=1
 
         for k in range(weight.shape[1]):
-            G.add_node(f'Cb^{i+1}_{k}', layer= i+2)
+            G.add_node(f'$\zeta^{{{i+1}}}_{{{k}}}$', layer= i+2)
             total_nodes +=1
 
 
@@ -335,20 +351,23 @@ class InductiveReasoningDT(object):
             weight = layers[i].weight.T
             for j in range(weight.shape[0]):
                 for k in range(weight.shape[1]):
-                    if weight[j][k].item() == 1:
-                        G.add_edge(f'Cb^{i}_{j}', 
-                                    f'Cb^{i+1}_{k}', 
+                    if weight[j][k].item() > 0:
+                        G.add_edge(f'$\zeta^{{{i}}}_{{{j}}}$', 
+                                    f'$\zeta^{{{i+1}}}_{{{k}}}$', 
                                     weight=1)
 
 
         # filter graph 
-        for node in G.nodes:
+        list_ = list(G.nodes)
+        for node in list_:
             if (G.out_degree(node) == 0) and (G.in_degree(node) == 0):
                 G.remove_node(node)
 
-        # pos_ = nx.multipartite_layout(G, scale=2000)
-        pos_ = nx.multipartite_layout(G, subset_key='layer', scale=2000)
-        nx.draw(G, pos_, edge_color='b', width=1, with_labels = True, arrows=True, arrowsize=20, node_size=1000) 
+        pos_ = nx.multipartite_layout(G, subset_key='layer', scale=2)
+        # pos_ = graphviz_layout(G, prog="twopi")
+        plt.figure(figsize=(20, 20))
+        nx.draw(G, pos_, edge_color='b', with_labels = True, node_size=1000) 
+        plt.savefig('global-tree.png')
         return G
     
 
@@ -370,7 +389,7 @@ class InductiveReasoningDT(object):
             for us in unique:
                 us_count = np.sum(s == us)
                 if us_count < self.threshold * mode_count:
-                    node = f'Cb^{k}_{us}'
+                    node = f'$\zeta^{{{k}}}_{{{us}}}$'
                     if node in list(self.nx_graph.nodes):
                         self.nx_graph.remove_node(node)
 
@@ -384,7 +403,7 @@ class InductiveReasoningDT(object):
         return_symbols = []
         for symbol in np.unique(filtered_symbols):
             symbol_count = np.sum(filtered_symbols == symbol)
-            if symbol_count > 0.5*mode_count:
+            if symbol_count > 0.1*mode_count:
                 return_symbols.append(symbol)
         return return_symbols
 
@@ -396,7 +415,7 @@ class InductiveReasoningDT(object):
         G.add_node(self.class_mapping[class_idx], layer= max_layers)
 
         class_symbols = self.get_class_symbol(class_idx)
-        node_names = [f'Cb^{len(self.ncodebook_features)-1}_{class_symbol}' for class_symbol in class_symbols]
+        node_names = [f'$\zeta^{{{len(self.ncodebook_features)-1}}}_{{{class_symbol}}}$' for class_symbol in class_symbols]
 
         
         for node in node_names:
@@ -417,12 +436,16 @@ class InductiveReasoningDT(object):
         
 
         # filter graph 
-        for node in G.nodes:
+        list_ = list(G.nodes)
+        for node in list_:
             if (G.out_degree(node) == 0) and (G.in_degree(node) == 0):
                 G.remove_node(node)
 
-        pos_ = nx.multipartite_layout(G, subset_key='layer', scale=2000)
-        nx.draw(G, pos_, edge_color='b', width=1, with_labels = True, arrows=True, arrowsize=20, node_size=1000) 
+        pos_ = nx.multipartite_layout(G, subset_key='layer', scale=2)
+        # pos_ = graphviz_layout(G, prog="twopi")
+        plt.figure(figsize=(4, 4))
+        nx.draw(G, pos_, edge_color='b', with_labels = True, node_size=1000) 
+        plt.savefig(f'class-{class_idx}-tree.png')
         return G
 
 
@@ -436,7 +459,7 @@ class InductiveReasoningDT(object):
 
         class_symbols = self.get_class_symbol(class_idx)
         class_symbols = [symbol for symbol in class_symbols if symbol in sampled_symbols[-1]]
-        node_names = [f'Cb^{len(self.ncodebook_features)-1}_{class_symbol}' for class_symbol in class_symbols]        
+        node_names = [f'$\zeta^{{{len(self.ncodebook_features)-1}}}_{{{class_symbol}}}$' for class_symbol in class_symbols]        
         
         for node in node_names:
             G.add_node(node, layer=max_layers - 1)
@@ -449,8 +472,9 @@ class InductiveReasoningDT(object):
             new_nodes = []
             for node in node_names:
                 parents = list(self.nx_graph.predecessors(node))
+                print (node, parents, layer_symbols)
                 for pnode in parents:
-                    if int(pnode.split('_')[-1]) in layer_symbols:
+                    if int(pnode.split('_')[-1][1:-2]) in layer_symbols:
                         G.add_node(pnode, layer= max_layers  - 2 - i)
                         G.add_edge(pnode, node, weight=1)
                         new_nodes.append(pnode)
@@ -459,17 +483,21 @@ class InductiveReasoningDT(object):
         
 
         # filter graph 
-        for node in G.nodes:
+        list_ = list(G.nodes)
+        for node in list_:
             if (G.out_degree(node) == 0) and (G.in_degree(node) == 0):
                 G.remove_node(node)
 
 
-        pos_ = nx.multipartite_layout(G, subset_key='layer', scale=2000)
-        nx.draw(G, pos_, edge_color='b', width=1, with_labels = True, arrows=True, arrowsize=20, node_size=1000) 
+        pos_ = nx.multipartite_layout(G, subset_key='layer', scale=2)
+        # pos_ = graphviz_layout(G, prog="twopi")
+        plt.figure(figsize=(4, 4))
+        nx.draw(G, pos_, edge_color='b', with_labels = True, node_size=1000) 
+        plt.savefig(f'local-tree.png')
         return G
 
 
-    def query(self, class_idx, visual=None, local = False):
+    def query(self, class_idx, visual=None, local = False, overlay=False, save_path=None):
         if local:
             graph = self.get_local_tree(class_idx, visual)
         else:
@@ -501,13 +529,17 @@ class InductiveReasoningDT(object):
                 print(rule)
                 if not (visual is None):
                     target, body = self.vsemantics.visual_rule(visual, rule)
-                    self.show(target, body)
+                    cmap = None if (i == 0) else get_transparent_cmap('bwr')
+                    if overlay:
+                        self.show(rule, target, body, cmap=cmap, overlay=visual.squeeze(0).cpu().numpy(), save_path=save_path)
+                    else:
+                        self.show(rule, target, body, cmap=cmap, save_path=save_path)
 
         return heirarchical_rules
     
     
-    def show(self, target, body, save_path=None):
-
+    def show(self, rule, target, body, save_path=None, cmap='coolwarm', overlay=None):
+        
         def check(image, normalize=True):
             if image.dtype == np.float32:
                 if normalize:
@@ -517,7 +549,7 @@ class InductiveReasoningDT(object):
                     
             if image.shape[0] == 3:
                 image = np.transpose(image, (1, 2, 0))
-                image = image [:, :, 0]
+                # image = image [:, :, 0]
             return image
 
         target = check(target.squeeze().cpu().numpy())
@@ -535,22 +567,30 @@ class InductiveReasoningDT(object):
         gs = gridspec.GridSpec(nrows, ncols)
         gs.update(wspace=0.2, hspace=0.02)
 
+        plt.suptitle(rule)
         ax = plt.subplot(gs[0, 0])
-        ax.imshow(target)
-
-        for xidx in range(len(body)):
-            ax = plt.subplot(gs[0, xidx + 1])
-            ax.imshow(body[xidx])
-
-        
+        if (target.shape[-1] != 3) and (not (overlay is None)) and (not (cmap is None)):
+            ax.imshow(check(overlay))
+        ax.imshow(target, cmap=cmap, alpha=1.0 if ((overlay is None) or (cmap is None)) else 0.8)
         ax.set_xticklabels([])
         ax.set_yticklabels([])
         ax.set_aspect('equal')
-        ax.set_title("visual rule")
         ax.tick_params(bottom='off', top='off', labelbottom='off', right='off', left='off', labelleft='off' )
     
+
+
+        for xidx in range(len(body)):
+            ax = plt.subplot(gs[0, xidx + 1])
+            if not (overlay is None):
+                ax.imshow(check(overlay))
+            ax.imshow(body[xidx], cmap=get_transparent_cmap('bwr'), alpha=1.0 if overlay is None else 0.8)
+            ax.set_xticklabels([])
+            ax.set_yticklabels([])
+            ax.set_aspect('equal')
+            ax.tick_params(bottom='off', top='off', labelbottom='off', right='off', left='off', labelleft='off' )
+        
         plt.tight_layout()
         if not (save_path is None):
-            plt.savefig(save_path)
+            plt.savefig(os.path.join(save_path, f'{rule}.png'))
         plt.show()
      

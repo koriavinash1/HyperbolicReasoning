@@ -21,7 +21,7 @@ from torch.nn.modules.module import Module
 
 def nonlinearity(x):
     # swish
-    return x*torch.sigmoid(x)
+    return F.relu6(x)#*torch.sigmoid(x)
 
 
 def Normalize(in_channels):
@@ -39,7 +39,10 @@ class Upsample(nn.Module):
                                         padding=1)
 
     def forward(self, x):
-        x = torch.nn.functional.interpolate(x, scale_factor=2.0, mode="bilinear", align_corners=True)
+        x = torch.nn.functional.interpolate(x, 
+                            scale_factor=2.0, 
+                            mode="bilinear", 
+                            align_corners=False)
         if self.with_conv:
             x = self.conv(x)
         return x
@@ -109,20 +112,21 @@ class HLoss(nn.Module):
         return b
 
 class Decoder(nn.Module):
-        def __init__(self, *, ch, 
-                        out_ch, 
+        def __init__(self, *, ch = 32, 
+                        out_ch = 3, 
+                        in_channels=3,
+                        z_channels = 64, 
                         ch_mult=(1, 2, 4, 8), 
-                        num_res_blocks,
+                        num_res_blocks=2,
                         dropout=0.0, 
                         resamp_with_conv=True, 
-                        in_channels,
-                        z_channels, 
-                        input):
+                        input=(64, 4, 4)):
             super(Decoder, self).__init__()
             self.ch = ch
-            self.temb_ch = 0
+            
             self.num_resolutions = len(ch_mult)
             block_in = ch * ch_mult[self.num_resolutions - 1]
+
             self.input = input
             self.inchannel = np.prod(self.input)
             self.num_res_blocks = num_res_blocks
@@ -154,7 +158,7 @@ class Decoder(nn.Module):
                     upl.append(Upsample(block_in, resamp_with_conv))
 
                 block_out = ch * ch_mult[i_level]
-                for i_block in range(self.num_res_blocks + 1):
+                for i_block in range(self.num_res_blocks):
                     upl.append(ResnetBlock2D(in_channels=block_in,
                                              out_channels=block_out,
                                              dropout=dropout))
@@ -186,7 +190,7 @@ class Decoder(nn.Module):
 
 
             x2 = self.midblock_1(x1)
-            x3 = self.midblock_1(x2)
+            x3 = self.midblock_2(x2)
             
             x4 = self.up(x3)
             x5 = self.norm_out(x4)
@@ -1096,7 +1100,7 @@ class HierarchyVQmodulator(nn.Module):
         p_loss = (nr_sum + 1)/(dr_sum + 1)
         # reasoning weights regularizations:
         all_linear1_params = torch.cat([x.view(-1) for x in list(self.reasoning_parameters())])
-        l1_regularization = 1e-3*torch.norm(all_linear1_params, 1)
+        l1_regularization = 1e-5*torch.norm(all_linear1_params, 1)
         loss += l1_regularization
 
         if self.trim and self.combine:

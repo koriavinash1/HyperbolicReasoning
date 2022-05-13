@@ -132,7 +132,7 @@ def get(batch_size,
     num_workers = kwargs.setdefault('num_workers', 1)
     input_size = kwargs.pop('input_size', None)
 
-    print("Building STL10 data loader with {} workers".format(num_workers))
+    print("Building data loader with {} workers".format(num_workers))
     ds = []
     if train:
         train_loader = torch.utils.data.DataLoader(

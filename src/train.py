@@ -24,6 +24,8 @@ import torchvision
 from sklearn.metrics import accuracy_score, f1_score
 import progressbar
 import matplotlib.pyplot as plt
+import matplotlib.patches as mpatches
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
@@ -139,7 +141,7 @@ class Trainer():
         self.opt = MomentumWithThresholdBinaryOptimizer(
                          list(self.modelclass.reasoning_parameters()),
                          list(self.classifier_quantized.parameters()) + list(self.modelclass.other_parameters()),
-                         ar=0.001,
+                         ar=0.0001,
                          threshold=1e-7,
                          adam_lr=self.lr,
                      )
@@ -242,15 +244,17 @@ class Trainer():
             class_loss_ = ce_loss(logits = dis_target, target = conti_target)
 
 
-            loss = class_loss_ +  quant_loss + ploss # quant_loss = quant_loss + cb_disentanglement_loss
-            loss.backward()
-            self.opt.step()
-
-
-            recon = self.dec(decoder_features.detach())
+            recon = self.dec(decoder_features.clone().detach())
             recon_loss_ = recon_loss(logits = recon, target = data)
             recon_loss_.backward()
             self.opt2.step()
+
+            # recon = self.dec(decoder_features)
+            # recon_loss_ = recon_loss(logits = recon, target = data)
+            loss = class_loss_ +  quant_loss + ploss #+ recon_loss_  # quant_loss = quant_loss + cb_disentanglement_loss
+            loss.backward()
+            self.opt.step()
+            # self.opt2.step()
 
 
             with torch.no_grad():
@@ -374,14 +378,15 @@ class Trainer():
         min_loss = np.inf
         min_recon = np.inf
 
-        plot = False
+        plot = True
 
         for iepoch in range(self.nepochs):
 
             self.training_step(train_loader, iepoch)
             loss, rloss, f1, acc, attnblocks, codebooks= self.validation_step(valid_loader, iepoch)
 
-            if plot and (iepoch==40):
+            if plot and ((iepoch % 1) ==0):
+                plt.figure(figsize=(10, 10))
                 for i in range(len(attnblocks)):
                     att = attnblocks[i].cpu().numpy()
                     cb1 = codebooks[i].cpu().numpy()
@@ -396,16 +401,25 @@ class Trainer():
                             x2 = [point2[0]]
                             y1 = [point1[1]]
                             y2 = [point2[1]]
+                            ptarrow = False
                             if att[j,k] == 1:
                                 if i == 0:
-                                   plt.plot(x1, y1, 'ro')
-                                   plt.plot(x2, y2, 'bs')
+                                    ptarrow = np.sum(att[:, k]) >= 10 #0.*att.shape[0]
+                                    plt.plot(x1, y1, 'ro')
+                                    plt.plot(x2, y2, 'bo')
                                 elif i == 1:
-                                   plt.plot(x2, y2, 'g^')
-                                    #               else:
-              #                  plt.plot(x, y)
+                                    ptarrow = np.sum(att[:, k]) >= 5 #0.*att.shape[0]
+                                    plt.plot(x2, y2, 'go')
 
-                plt.savefig('poincaretesthacksphere.png')
+                            if ptarrow:
+                                plt.arrow(x2[0], y2[0], x1[0]-x2[0], y1[0]-y2[0])
+
+                r_patch = mpatches.Patch(color='r', label="$\zeta^1$ symbols")
+                b_patch = mpatches.Patch(color='b', label="$\zeta^2$ symbols")
+                g_patch = mpatches.Patch(color='g', label="$\zeta^3$ symbols")
+
+                plt.legend(handles=[r_patch, b_patch, g_patch])
+                plt.savefig(f'poincaresphere-{iepoch}.png', )
                   
 
             stats = {'loss': loss, 'f1': f1, 'acc': acc, 'rloss': rloss}

@@ -6,6 +6,7 @@ from Classifier import model
 model_urls = {
     'stl10': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/STL10/best.pth',
     'afhq': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/AFHQ/best.pth',
+    'vafhq': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/AFHQVanilla/best.pth',
     'mnistti': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/MorphoMNISTv2/TI/best.pth',
     'mnistit': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/MorphoMNISTv2/IT/best.pth',
     'mnistts': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/MorphoMNISTv2/TS/best.pth',
@@ -109,3 +110,24 @@ def afhq(n_channel, pretrained=None):
 
         print ("AFHQ weights loaded ............")
     return net
+
+
+def vafhq(n_channel, pretrained=None):
+    cfg = [
+        # n_channel, 'M',
+        # 2*n_channel, 'M',
+        # 4*n_channel, 'M',
+        # 4*n_channel, 'M',
+        n_channel, 'M', 
+        n_channel, 'M', 
+        2*n_channel, 'M',
+    ]
+    layers = make_layers(cfg, batch_norm=True)
+    model = SVHN(layers, n_channel=32*n_channel, num_classes=3)
+    if pretrained is not None:
+        m = torch.load(model_urls['vafhq'])
+        state_dict = m.state_dict() if isinstance(m, nn.Module) else m
+        assert isinstance(state_dict, (dict, OrderedDict)), type(state_dict)
+        model.load_state_dict(state_dict)
+        print ("AFHQ weights loaded from ", model_urls['vafhq'])
+    return model

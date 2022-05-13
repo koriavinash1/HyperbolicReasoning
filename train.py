@@ -14,11 +14,11 @@ import numpy as np
 
 def train_from_folder(\
                       data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNISTv0/TI/data',
-                      logs_root='logs',
-                      name='MNIST2',
+                      logs_root='LOGS',
+                      name='MNISTL2',
                       image_size=(32,32),
                       codebook_size = [64, 32, 10],
-                      latent_dim=32,
+                      latent_dim=64,
                       in_channels_codebook = 64,
                       batch_size=50,
                       ch_mult=(1, 2, 4, 8),
@@ -27,24 +27,24 @@ def train_from_folder(\
                       ch=32,
                       num_res_blocks = 1,
 
-                    #   codebook_size = [128, 32, 3],
+                    #   codebook_size = [128, 64, 3],
                     #   name='AFHQ',
                     #   data_root='/vol/biomedic2/agk21/PhDLogs/datasets/AFHQ/afhq',
-                    #   logs_root='../logs',
+                    #   logs_root='LOGS',
                     #   image_size=(128,128),
-                    #   batch_size=15,
+                    #   batch_size=16,
                     #   latent_dim=512,
                     #   in_channels_codebook = 1024,
                     #   ch_mult=(1, 2, 4, 8, 16, 32),
                     #   nclasses=3,
-                    #   ch=32,
-                    #   num_res_blocks = 1,
+                    #   ch=16,
+                    #   num_res_blocks = 3,
                     #   avg_pool=True,
 
 
-                      nepochs=100,
-                      learning_rate=2e-4,
-                      decoder_learning_rate=2e-4,
+                      nepochs=1000,
+                      learning_rate=1e-3,
+                      decoder_learning_rate=1e-3,
                       num_workers=10,
                       sigma = 0.1,
                       seed=42,
@@ -105,6 +105,7 @@ def train_from_folder(\
         net = stl10(3, True)
     elif data_root.lower().__contains__('afhq'):
         net = afhq(3, True)
+        # net = afhq(32, True)
     else:
         raise ValueError("explainee model not found")
 
