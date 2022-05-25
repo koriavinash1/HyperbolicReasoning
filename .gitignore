@@ -4,6 +4,7 @@ __pycache__/
 *$py.class
 *Logs*
 *LOGS*
+*logs*
 *.json
 
 *.png*
