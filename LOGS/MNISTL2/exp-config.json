@@ -8,7 +8,7 @@
     "codebook_size": [
         64,
         32,
-        10
+        4
     ],
     "inchannels_codebook": 64,
     "batch_size": 50,

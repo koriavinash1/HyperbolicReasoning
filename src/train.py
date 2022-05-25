@@ -11,7 +11,7 @@ from src.clsmodel import mnist, afhq #, stl10
 from src.loss import recon_loss, ce_loss
 from src.dataset import get
 from src.radam import RiemannianAdam
-from src.reasoning import MomentumWithThresholdBinaryOptimizer
+from src.reasoning import MomentumWithThresholdBinaryOptimizer, BinaryLinear
 
 from torch.optim import Adam, SGD
 import numpy as np
@@ -125,7 +125,7 @@ class Trainer():
         self.inchannel = self.latent_size 
         # self.inchannel = self.emb_dim  if (self.trim and not self.combine) else np.prod(self.latentdim)
         clfq = []
-        clfq.append(nn.Linear(self.inchannel, self.nclasses))
+        clfq.append(BinaryLinear(self.inchannel, self.nclasses))
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
 
 
@@ -139,9 +139,9 @@ class Trainer():
 
 
         self.opt = MomentumWithThresholdBinaryOptimizer(
-                         list(self.modelclass.reasoning_parameters()),
-                         list(self.classifier_quantized.parameters()) + list(self.modelclass.other_parameters()),
-                         ar=0.0001,
+                         list(self.modelclass.reasoning_parameters()) + list(self.classifier_quantized.parameters()),
+                         list(self.modelclass.other_parameters()),
+                         ar=0.0001, 
                          threshold=1e-7,
                          adam_lr=self.lr,
                      )
@@ -414,9 +414,9 @@ class Trainer():
                             if ptarrow:
                                 plt.arrow(x2[0], y2[0], x1[0]-x2[0], y1[0]-y2[0])
 
-                r_patch = mpatches.Patch(color='r', label="$\zeta^1$ symbols")
-                b_patch = mpatches.Patch(color='b', label="$\zeta^2$ symbols")
-                g_patch = mpatches.Patch(color='g', label="$\zeta^3$ symbols")
+                r_patch = mpatches.Patch(color='r', label="$\zeta^0$ symbols")
+                b_patch = mpatches.Patch(color='b', label="$\zeta^1$ symbols")
+                g_patch = mpatches.Patch(color='g', label="$\zeta^2$ symbols")
 
                 plt.legend(handles=[r_patch, b_patch, g_patch])
                 plt.savefig(f'poincaresphere-{iepoch}.png', )

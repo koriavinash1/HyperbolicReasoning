@@ -1099,9 +1099,9 @@ class HierarchyVQmodulator(nn.Module):
 
         p_loss = (nr_sum + 1)/(dr_sum + 1)
         # reasoning weights regularizations:
-        all_linear1_params = torch.cat([x.view(-1) for x in list(self.reasoning_parameters())])
-        l1_regularization = 1e-5*torch.norm(all_linear1_params, 1)
-        loss += l1_regularization
+        # all_linear1_params = torch.cat([x.view(-1) for x in list(self.reasoning_parameters())])
+        # l1_regularization = 1e-5*torch.norm(all_linear1_params, 1)
+        # loss += l1_regularization
 
         if self.trim and self.combine:
             z_combine = torch.cat(sampled_features, dim=1)

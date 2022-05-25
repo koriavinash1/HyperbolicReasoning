@@ -5,7 +5,7 @@ import json
 from tqdm import tqdm
 from src.train import Trainer
 
-from clsmodel import mnist, stl10, afhq
+from clsmodel import mnist, stl10, afhq, vafhq
 import torch
 import torch.distributed as dist
 
@@ -17,7 +17,7 @@ def train_from_folder(\
                       logs_root='LOGS',
                       name='MNISTL2',
                       image_size=(32,32),
-                      codebook_size = [64, 32, 10],
+                      codebook_size = [64, 32, 4],
                       latent_dim=64,
                       in_channels_codebook = 64,
                       batch_size=50,
@@ -27,19 +27,19 @@ def train_from_folder(\
                       ch=32,
                       num_res_blocks = 1,
 
-                    #   codebook_size = [128, 64, 3],
-                    #   name='AFHQ',
+                    #   codebook_size = [128, 64, 2],
+                    #   name='AFHQ2',
                     #   data_root='/vol/biomedic2/agk21/PhDLogs/datasets/AFHQ/afhq',
                     #   logs_root='LOGS',
-                    #   image_size=(128,128),
-                    #   batch_size=16,
+                    #   image_size=(32,32),
+                    #   batch_size=50,
                     #   latent_dim=512,
-                    #   in_channels_codebook = 1024,
-                    #   ch_mult=(1, 2, 4, 8, 16, 32),
+                    #   in_channels_codebook = 64,
+                    #   ch_mult=(1, 2, 4, 8),
                     #   nclasses=3,
-                    #   ch=16,
-                    #   num_res_blocks = 3,
-                    #   avg_pool=True,
+                    #   ch=32,
+                    #   num_res_blocks = 2,
+                    #   avg_pool=False,
 
 
                       nepochs=1000,
@@ -104,8 +104,8 @@ def train_from_folder(\
     elif data_root.lower().__contains__('stl'):
         net = stl10(3, True)
     elif data_root.lower().__contains__('afhq'):
-        net = afhq(3, True)
-        # net = afhq(32, True)
+        # net = afhq(3, True)
+        net = vafhq(32, True)
     else:
         raise ValueError("explainee model not found")
 

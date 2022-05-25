@@ -397,20 +397,21 @@ class InductiveReasoningDT(object):
     def get_class_symbol(self, class_idx):
         xbatch = self.Xdata[self.Ydata == class_idx]
         sampled_symbols, y, sampled_features = self.forward(xbatch)
-        filtered_symbols = (sampled_symbols[-1])[y == class_idx].flatten() #TODO: filtering
+        filtered_symbols = (sampled_symbols[-1]).flatten() #TODO: filtering
         mode = stats.mode(filtered_symbols)
         mode_count = np.sum(filtered_symbols == mode)
         return_symbols = []
         for symbol in np.unique(filtered_symbols):
             symbol_count = np.sum(filtered_symbols == symbol)
-            if symbol_count > 0.1*mode_count:
+            if symbol_count > 0.5*mode_count:
                 return_symbols.append(symbol)
         return return_symbols
 
 
-    def get_class_tree(self, class_idx):
+    def get_class_tree(self, class_idx, savepath='.'):
         G = nx.DiGraph()
         max_layers = len(self.ncodebook_features)+1
+        os.makedirs(savepath, exist_ok=True)
 
         G.add_node(self.class_mapping[class_idx], layer= max_layers)
 
@@ -445,13 +446,14 @@ class InductiveReasoningDT(object):
         # pos_ = graphviz_layout(G, prog="twopi")
         plt.figure(figsize=(4, 4))
         nx.draw(G, pos_, edge_color='b', with_labels = True, node_size=1000) 
-        plt.savefig(f'class-{class_idx}-tree.png')
+        plt.savefig(os.path.join(savepath, f'class-{class_idx}-tree.png'))
         return G
 
 
-    def get_local_tree(self, class_idx, x):
+    def get_local_tree(self, class_idx, x, savepath='.'):
         G = nx.DiGraph()
         sampled_symbols, _, _ = self.forward(x)
+        os.makedirs(savepath, exist_ok=True)
 
         max_layers = len(self.ncodebook_features)+1
         G.add_node(self.class_mapping[class_idx], layer= max_layers)
@@ -493,7 +495,7 @@ class InductiveReasoningDT(object):
         # pos_ = graphviz_layout(G, prog="twopi")
         plt.figure(figsize=(4, 4))
         nx.draw(G, pos_, edge_color='b', with_labels = True, node_size=1000) 
-        plt.savefig(f'local-tree.png')
+        plt.savefig(os.path.join(savepath, 'local-tree.png'))
         return G
 
 
@@ -502,6 +504,8 @@ class InductiveReasoningDT(object):
             graph = self.get_local_tree(class_idx, visual)
         else:
             graph = self.get_class_tree(class_idx)
+
+        os.makedirs(save_path, exist_ok=True)
 
         node_names = [self.class_mapping[class_idx]]
         heirarchical_rules = []
