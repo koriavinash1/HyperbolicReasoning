@@ -448,6 +448,7 @@ class VectorQuantizer2DHS(nn.Module):
     def forward(self, z, 
                     prev_cb = None,
                     attention_w = None,
+                    si = None,
                     temp=None, rescale_logits=False, return_logits=False):
         
         assert temp is None or temp==1.0, "Only for interface compatible with Gumbel"
@@ -498,12 +499,61 @@ class VectorQuantizer2DHS(nn.Module):
                                     attention_w)
             cb_attnx = self.to_poincare(self.expmap0(cb_attn, 1), 1)
             zfl = self.to_poincare(self.expmap0(z_flattened,1), 1)
-            dd = self.dist(zfl, cb_attnx)
+            #dd = self.dist(zfl, cb_attnx)
+            #min_encoding_indices = torch.argmin(dd, dim =1)
+            dd = torch.ones(si.shape[0], z.shape[1], self.n_e, device = self.device)
+            bin_att = torch.where(attention_w !=  0, 1, 0)
+            zfl2 = zfl.view(si.shape[0], z.shape[1], zfl.shape[1])
+            for v in range(si.shape[0]):
+                f = torch.ones( z.shape[1],self.n_e,  device = self.device)
+                #f[f!=0]= 10e+6 #float('inf')
+                samplesind = torch.squeeze(si[v,:])
+                samples = bin_att[samplesind]
+                samples = torch.squeeze(torch.sum(samples, dim =0))
+                if torch.sum(samples)  ==  0:
+                   sampled_i = torch.squeeze(torch.nonzero(samples > -1))
+                   samplesf = cb_attnx[sampled_i]
+                elif torch.squeeze(torch.nonzero(samples > 0)).dim()  > 0:
+                   sampled_i = torch.squeeze(torch.nonzero(samples > 0))
+                   samplesf = cb_attnx[sampled_i]
+                else:
+                   sampled_i = torch.nonzero(samples > 0)
+                   samplesf = torch.squeeze(cb_attnx[sampled_i], dim = 0)
+                newd= self.dist(zfl2[v],  samplesf)
+                #f.scatter_(0,samplesind,torch.squeeze(newd).T)
+                f[:,torch.squeeze(sampled_i, dim =0)] = newd
+                dd[v]=f#.scatter_(0,torch.unsqueeze(sampled_i, dim = 0),torch.squeeze(newd))
+            dd = dd.view(zfl.shape[0], self.n_e)
+
+            """
+            i_flattened = si.view(-1, 1)
+            for v, w in enumerate(i_flattened):
+                f = torch.ones(self.n_e, device = self.device)
+                #f.to(self.device)
+                f[f>0]= float('inf')
+                sampled_i = torch.squeeze(bin_att[w,:])
+                if torch.sum(sampled_i)  ==  0:
+                   sampled_i = torch.squeeze(torch.nonzero(sampled_i > -1))
+                elif torch.sum(sampled_i)  > 1:
+                   sampled_i = torch.squeeze(torch.nonzero(sampled_i > 0))
+                else:
+                   sampled_i = torch.squeeze(torch.nonzero(sampled_i > 0), dim = 0)
+                #elif torch.squeeze(torch.nonzero(sampled_i > 0).shape[0]) == 0:
+
+                newd = self.dist(torch.unsqueeze(zfl[v], dim =0), cb_attnx[sampled_i])# if len(sampled_i) > 1 else torch.squeeze(cb_attnx[sampled_i], dim =0))
+                f.scatter_(0,sampled_i,torch.squeeze(newd))
+                dd[v]=f#.scatter_(0,torch.unsqueeze(sampled_i, dim = 0),torch.squeeze(newd))
+             """
+
+
+
+            #dd = self.dist(zfl, cb_attnx)
             min_encoding_indices = torch.argmin(dd, dim =1)
-            
+            si = min_encoding_indices.view(z.shape[0], z.shape[1])
             
             z_q = self.logmap0(self.to_hyperboloid(cb_attnx[min_encoding_indices], 1),1).view(z.shape)
-            zn = torch.nn.functional.normalize(z_q)            
+            zn =torch.nn.functional.normalize(self.logmap0(self.h1(self.to_hyperboloid(cb_attnx[min_encoding_indices], 1)),1)).view(z.shape)
+            #zn = torch.nn.functional.normalize(z_q)            
             #cb_loss = F.mse_loss(z_q2, z_q2)
             #print(cb_loss)
 
@@ -548,7 +598,7 @@ class VectorQuantizer2DHS(nn.Module):
                     codebookvariance, 
                     total_min_distance,  
                     hsw, 
-                    torch.mean(self.r), prevcb, attention_w,  cb_attn, zn)
+                    torch.mean(self.r), prevcb, attention_w,  cb_attn, si, zn)
                     
 
     def get_codebook_entry(self, indices, shape):
@@ -887,7 +937,7 @@ class HierarchyVQmodulator(nn.Module):
         self.featureattns = nn.ModuleList([])
         self.hyperbolicLayers = nn.ModuleList([])
         for zch in zchannels:
-            self.featureattns.append(BinaryLinear(zch[0],zch[1]))
+            self.featureattns.append(torch.nn.Linear(zch[0],zch[1]))
             self.hyperbolicLayers.append(HNNLayer(emb_dim, emb_dim, 1, 0, True ))
 
 
@@ -913,14 +963,18 @@ class HierarchyVQmodulator(nn.Module):
 
         wc = weightConstraint2()
         if self.reasoning:
-            self.reasoningLayers = nn.ModuleList([])  
+            self.reasoningLayers = nn.ModuleList([])
+            self.Aggregation = nn.ModuleList([])
             for i in range(len(codebooksize) - 1):
+
                 self.rattn = BinaryLinear(codebooksize[i],
                                             codebooksize[i+1],
                                         )
+                self.r = torch.nn.Linear(codebooksize[i],
+                                        codebooksize[i+1],
                 self.rattn.apply(wc)
                 self.reasoningLayers.append(self.rattn)   
-
+                self.Aggregation.append(self.r)
 
         # ====================================================================
         # poincare layers for poincare projection
@@ -1039,13 +1093,13 @@ class HierarchyVQmodulator(nn.Module):
         for i in range(len(self.quantizeBlocks)):
             if i == 0:
                 z_q, loss, sampled_idx, ce, td, hrc, r, \
-                    prevcb, attention_w, cb_attnp, zn = self.quantizeBlocks[i](qinput)
+                    prevcb, attention_w, cb_attnp,si, zn = self.quantizeBlocks[i](qinput)
                 cb_attnp = self.quantizeBlocks[0].embedding.weight.clone()
             else: 
                 z_q, loss, sampled_idx, ce, td, hrc, r, \
-                    prevcb, attention_w, cb_attnp, zn = self.quantizeBlocks[i](qinput,
+                    prevcb, attention_w, cb_attnp, si, zn = self.quantizeBlocks[i](qinput,
                                                             cb_attnp,
-                                                            self.reasoningLayers[i-1].weight.T)
+                                                            (self.reasoningLayers[i-1].weight*self.Aggregation[i-1].weight).T, si)
 
             if i < (len(self.quantizeBlocks) -1):
                 qinput = self.attention(z_q, self.featureattns[i], self.hyperbolicLayers[i])

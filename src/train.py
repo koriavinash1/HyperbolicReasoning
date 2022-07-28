@@ -238,7 +238,23 @@ class Trainer():
             else:
                 decoder_features = classifier_features = features
 
-            classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
+            #classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
+            # classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1] * classifier_features.shape[2]*classifier_features.shape[3])
+            classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3])
+            cf = []
+            for i in range(classifier_features.shape[0]):
+                x = torch.round(torch.mean(classifier_features[i], dim =1)* 10**5)/ (10**5)
+                xx = torch.unique(x)
+                w = []
+                for j in range(xx.shape[0]):
+                    y = torch.nonzero(xx[j] == x)
+                    z = classifier_features[i][y[0]]
+                    w.append(z)
+                w = torch.mean(torch.stack(w), dim = 0)
+                cf.append(w)
+
+            classifier_features = torch.stack(cf)
+            #classifier_features = torch.mean(torch.unique(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]),dim=2), 2)
             # classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1] * classifier_features.shape[2]*classifier_features.shape[3])
             dis_target = m(self.cq(classifier_features))
             class_loss_ = ce_loss(logits = dis_target, target = conti_target)
@@ -254,6 +270,10 @@ class Trainer():
             loss = class_loss_ +  quant_loss + ploss #+ recon_loss_  # quant_loss = quant_loss + cb_disentanglement_loss
             loss.backward()
             self.opt.step()
+            for l in self.modelclass.Aggregation:
+                l.weight=torch.nn.Parameter((l.weight - torch.min(l.weight))/(torch.max(l.weight) - torch.min(l.weight)))
+            for l in self.modelclass.featureattns:
+                l.weight=torch.nn.Parameter((l.weight - torch.min(l.weight))/(torch.max(l.weight) - torch.min(l.weight)))
             # self.opt2.step()
 
 
