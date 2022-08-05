@@ -4,14 +4,12 @@ import torch.utils.model_zoo as model_zoo
 from collections import OrderedDict
 from Classifier import model
 model_urls = {
-    'stl10': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/STL10/best.pth',
-    'afhq': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/AFHQ/best.pth',
-    'vafhq': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/AFHQVanilla/best.pth',
-    'mnistti': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/MorphoMNISTv2/TI/best.pth',
-    'mnistit': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/MorphoMNISTv2/IT/best.pth',
-    'mnistts': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/MorphoMNISTv2/TS/best.pth',
-    'mnisttswi': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/MorphoMNISTv2/TSWI/best.pth',
-    'mnisttswiv2': '/vol/biomedic2/agk21/PhDLogs/codes/stylEX-extention/Classifier/Logs/MorphoMNISTv2/TSWIv2/best.pth',
+    'afhq': '/vol/biomedic2/agk21/PhDLogs/codes/HyperbolicReasoning/Classifier/Logs/AFHQ/best.pth',
+    'mnistti': '/vol/biomedic2/agk21/PhDLogs/codes/HyperbolicReasoning/Classifier/Logs/MNIST/best.pth',
+    'mnistit': '/vol/biomedic2/agk21/PhDLogs/codes/HyperbolicReasoning/Classifier/Logs/MNIST/best.pth',
+    'mnistts': '/vol/biomedic2/agk21/PhDLogs/codes/HyperbolicReasoning/Classifier/Logs/MNIST/best.pth',
+    'mnisttswi': '/vol/biomedic2/agk21/PhDLogs/codes/HyperbolicReasoning/Classifier/Logs/MNIST/best.pth',
+    'mnisttswiv2': '/vol/biomedic2/agk21/PhDLogs/codes/HyperbolicReasoning/Classifier/Logs/MNIST/best.pth',
 }
 
 class SVHN(nn.Module):

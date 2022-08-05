@@ -1,6 +1,6 @@
 import torch.optim
 from src.manifolds import Euclidean, ManifoldParameter
-
+"""Riemannian adam optimizer geoopt implementation (https://github.com/geoopt/)."""
 # in order not to create it at each iteration
 _default_manifold = Euclidean()
 

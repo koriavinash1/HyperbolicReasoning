@@ -26,22 +26,6 @@ def train_from_folder(\
                       avg_pool=False,
                       ch=32,
                       num_res_blocks = 1,
-
-                    #   codebook_size = [128, 64, 2],
-                    #   name='AFHQ2',
-                    #   data_root='/vol/biomedic2/agk21/PhDLogs/datasets/AFHQ/afhq',
-                    #   logs_root='LOGS',
-                    #   image_size=(32,32),
-                    #   batch_size=50,
-                    #   latent_dim=512,
-                    #   in_channels_codebook = 64,
-                    #   ch_mult=(1, 2, 4, 8),
-                    #   nclasses=3,
-                    #   ch=32,
-                    #   num_res_blocks = 2,
-                    #   avg_pool=False,
-
-
                       nepochs=1000,
                       learning_rate=1e-3,
                       decoder_learning_rate=1e-3,
@@ -52,7 +36,6 @@ def train_from_folder(\
                       resamp_with_conv=True,
                       in_channels =3,
                       trim=False,
-                      combine=False,
                       reasoning=True
                       ):
 
@@ -79,7 +62,6 @@ def train_from_folder(\
         in_channels=in_channels,
         trim = trim,
         avg_pool=avg_pool,
-        combine=combine,
         reasoning=reasoning
     )
 

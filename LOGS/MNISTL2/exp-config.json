@@ -33,6 +33,5 @@
     "in_channels": 3,
     "trim": false,
     "avg_pool": false,
-    "combine": false,
     "reasoning": true
 }

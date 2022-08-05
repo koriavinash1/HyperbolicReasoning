@@ -3,9 +3,7 @@ import torch.nn as nn
 from torchvision import models
 import torch.utils.model_zoo as model_zoo
 import os
-from utee import misc
 from collections import OrderedDict
-print = misc.logger.info
 
 model_urls = {
     'stl10': 'http://ml.cs.tsinghua.edu.cn/~chenxi/pytorch-models/stl10-866321e9.pth',

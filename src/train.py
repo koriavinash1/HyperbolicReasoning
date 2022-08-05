@@ -6,7 +6,7 @@ from torch import nn
 import fire
 import json
 
-from src.layer import Decoder, VQmodulator,  HierarchyVQmodulator
+from src.layer import Decoder,  HierarchyVQmodulator
 from src.clsmodel import mnist, afhq #, stl10
 from src.loss import recon_loss, ce_loss
 from src.dataset import get
@@ -54,19 +54,19 @@ class Trainer():
                     in_channels =3,
                     log = False,
                     trim=False,
-                    combine=False,
+                    quantise = 'feature',
                     reasoning=True):
 
         self.latent_size = latent_dim
+        self.quantise = quantise
         self.cuda = True
         self.log = log
         self.seed = seed
         self.nclasses = nclasses
 
         map = lambda x, y: [x[i]//y[-1] for i in range(len(x))]
+        self.emb_dim = inchannels_codebook if self.quantise == 'spatial' else int(np.prod(map(image_size, ch_mult))) 
         self.latentdim = [self.latent_size]+map(image_size, ch_mult)
-        self.emb_dim = int(np.prod(map(image_size, ch_mult)))
-
 
         self.nepochs = nepochs
         self.batch_size = batch_size
@@ -78,7 +78,6 @@ class Trainer():
         self.given_channels = inchannels_codebook
         self.required_channels = latent_dim
         self.trim = trim 
-        self.combine = combine 
         self.reasoning = reasoning
 
         self.__init__dl()
@@ -105,36 +104,21 @@ class Trainer():
 
         # Code book defn
         self.codebook_size = codebook_size 
-        if isinstance(self.codebook_size, int):
-            # TODO: need correction
-            self.modelclass = VQmodulator(features = self.given_channels,  
-                                       z_channels = self.required_channels, 
-                                       codebooksize = self.codebook_size,
-                                       device = self.device).to(self.device)
-        else:
-            self.modelclass = HierarchyVQmodulator(features = self.given_channels,  
+        self.modelclass = HierarchyVQmodulator(features = self.given_channels,  
                                                 z_channels = self.required_channels, 
                                                 emb_dim = self.emb_dim,
                                                 codebooksize = codebook_size, 
                                                 device = self.device,
                                                 trim = self.trim,
-                                                combine=self.combine,
+                                                quantise = self.quantise,
                                                 reasoning=self.reasoning).to(self.device)
         
         # Quantized classifier
-        self.inchannel = self.latent_size 
-        # self.inchannel = self.emb_dim  if (self.trim and not self.combine) else np.prod(self.latentdim)
         clfq = []
-        clfq.append(BinaryLinear(self.inchannel, self.nclasses))
+        clfq.append(BinaryLinear(self.emb_dim, self.nclasses))
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
 
 
-        # Optimizers
-        
-        # self.opt = Adam(list(self.modelclass.other_parameters()) + \
-        #                  list(self.classifier_quantized.parameters()),
-        #                  lr=self.lr)
-        # self.LR_sch = ReduceLROnPlateau(self.opt, patience=2)
             
 
 
@@ -230,7 +214,7 @@ class Trainer():
                     
 
             # code book sampling
-            quant_loss, ploss, features, _, ce , td, hrc, r, attnblocks, codebooks  = self.modelclass(f)
+            quant_loss, ploss, features, _, cvE , cdE, attnblocks, codebooks  = self.modelclass(f)
 
             if isinstance(features, list):
                 classifier_features = features[-1]
@@ -238,10 +222,9 @@ class Trainer():
             else:
                 decoder_features = classifier_features = features
 
-            #classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
-            # classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1] * classifier_features.shape[2]*classifier_features.shape[3])
             classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3])
             cf = []
+            # Unique sampling of final codebook symbols
             for i in range(classifier_features.shape[0]):
                 x = torch.round(torch.mean(classifier_features[i], dim =1)* 10**5)/ (10**5)
                 xx = torch.unique(x)
@@ -254,8 +237,6 @@ class Trainer():
                 cf.append(w)
 
             classifier_features = torch.stack(cf)
-            #classifier_features = torch.mean(torch.unique(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]),dim=2), 2)
-            # classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1] * classifier_features.shape[2]*classifier_features.shape[3])
             dis_target = m(self.cq(classifier_features))
             class_loss_ = ce_loss(logits = dis_target, target = conti_target)
 
@@ -265,20 +246,17 @@ class Trainer():
             recon_loss_.backward()
             self.opt2.step()
 
-            # recon = self.dec(decoder_features)
-            # recon_loss_ = recon_loss(logits = recon, target = data)
             loss = class_loss_ +  quant_loss + ploss #+ recon_loss_  # quant_loss = quant_loss + cb_disentanglement_loss
             loss.backward()
             self.opt.step()
+            # Normalising weights of edges
             for l in self.modelclass.Aggregation:
                 l.weight=torch.nn.Parameter((l.weight - torch.min(l.weight))/(torch.max(l.weight) - torch.min(l.weight)))
+            # Normalise weights of feature attention function
             for l in self.modelclass.featureattns:
                 l.weight=torch.nn.Parameter((l.weight - torch.min(l.weight))/(torch.max(l.weight) - torch.min(l.weight)))
-            # self.opt2.step()
 
 
-            with torch.no_grad():
-                 self.modelclass.quantizeBlocks[0].r.clamp_(0.9, 1.1)
 
             self.training_pbar.update(batch_idx)
             self.training_widgets[0] = progressbar.FormatLabel(
@@ -288,10 +266,8 @@ class Trainer():
                                 f" poincareloss:%.4f" % ploss +
                                 f" trcnloss:%.4f" % recon_loss_ +
                                 f" tqloss:%.4f" % quant_loss +
-                                f" radius:%.4f" % r +
-                                f" thsploss:%.4f" % hrc +
-                                f" t<cb distance>:%.4f" % td +
-                                f" t<cb variance>:%.4f" % ce +
+                                f" t<mean Euclidian codebook distance>:%.4f" % cdE +
+                                f" t<mean Euclidian codebook variance>:%.4f" % cvE +
                                 f" ttloss:%.4f" % loss
                             )
         pass
@@ -318,7 +294,7 @@ class Trainer():
 
 
             # code book sampling
-            quant_loss, ploss, features, _, ce , td, hrc, r, attnblocks, codebooks = self.modelclass(f)
+            quant_loss, ploss, features, _, cdE, cvE,  attnblocks, codebooks = self.modelclass(f)
 
             if isinstance(features, list):
                 classifier_features = features[-1]
@@ -327,7 +303,6 @@ class Trainer():
                 decoder_features = classifier_features = features
 
             classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
-            #classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1] * classifier_features.shape[2]*classifier_features.shape[3])
 
             dis_target = m(self.cq(classifier_features))
             recon = self.dec(decoder_features)
@@ -370,11 +345,10 @@ class Trainer():
             # print(                    
                                 f" vepoch:%.1f" % epoch +
                                 f" vrcnloss:%.4f" % recon_loss_ +
-                                f" vhsploss:%.4f" % hrc + 
                                 f" vcloss:%.4f" % class_loss_ +
                                 f" poincareloss:%.4f" % ploss +
-                                f" v<tcd distance>:%.4f" % td +
-                                f" v<tcb variance>:%.4f" % ce +
+                                f" v<mean Euclidian codebook distance>:%.4f" % cdE +
+                                f" v<mean Eucdlian codebook variance>:%.4f" % cvE +
                                 f" tv loss:%.4f" % loss +
                                 f" vF1:%.4f" % f1_ +
                                 f" vAcc:%.4f" % acc 
@@ -444,9 +418,6 @@ class Trainer():
 
             stats = {'loss': loss, 'f1': f1, 'acc': acc, 'rloss': rloss}
             print ('Epoch: {}. Stats: {}'.format(iepoch, stats))
-            # print (torch.mean(self.modelclass.rattn1.weight), torch.std(self.modelclass.rattn1.weight))
-            # print (torch.mean(self.modelclass.rattn2.weight), torch.std(self.modelclass.rattn2.weight))
-            # print (torch.mean(self.modelclass.rattn3.weight), torch.std(self.modelclass.rattn3.weight))
 
             if loss < min_loss:
                 self.save_classmodel(iepoch, stats)

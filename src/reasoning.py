@@ -19,7 +19,7 @@ _scalar_or_tuple_2_t = Union[T, Tuple[T, T]]
 _size_2_t = _scalar_or_tuple_2_t[int]
 
 # Quantizers
-
+# This class is taken from https://github.com/bsridatta/Rethinking-Binarized-Neural-Network-Optimization/blob/master/research_seed/bytorch/binary_neural_network.py
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class Binarize(Function):
     clip_value = 1
@@ -48,7 +48,7 @@ class Binarize(Function):
 binarize = Binarize.apply
 
 # Optimizers for binary networks
-
+# This class has been modified from https://github.com/bsridatta/Rethinking-Binarized-Neural-Network-Optimization/blob/master/research_seed/bytorch/binary_neural_network.py
 class MomentumWithThresholdBinaryOptimizer(Optimizer):
     def __init__(
         self,
@@ -111,18 +111,8 @@ class MomentumWithThresholdBinaryOptimizer(Optimizer):
                
 
                 flips[param_idx] = (mask == -1).sum().item()
-                #p.data = (p.data + mask)**2
-                # p.data =torch.heaviside(p.data, torch.tensor([0.0]).to(device))
-                #x[x>0] = 1
-
-                # q = torch.sum(p.data, 0)
-                # q = q.repeat(p.data.shape[0], 1)
-                # q[q==0] = 1
-
-                #p.data = x 
                 p.data.add_(mask)
                 p.data.abs_()
-                # p.data.div_(q)
 
         return flips
 
@@ -133,7 +123,7 @@ class MomentumWithThresholdBinaryOptimizer(Optimizer):
 
 # binary torch layers
 
-
+# This class is taken from https://github.com/bsridatta/Rethinking-Binarized-Neural-Network-Optimization/blob/master/research_seed/bytorch/binary_neural_network.py
 class BinaryLinear(nn.Linear):
     def __init__(
         self,
@@ -167,44 +157,6 @@ class BinaryLinear(nn.Linear):
         return f.linear(inp, weight, bias)
 
 
-class BinaryConv2d(nn.Conv2d):
-    def __init__(
-        self,
-        in_channels: int,
-        out_channels: int,
-        kernel_size: _size_2_t,
-        stride=1,
-        padding=1,
-        bias=False,
-        keep_latent_weight=False,
-        binarize_input=False,
-    ):
-        super().__init__(
-            in_channels, out_channels, kernel_size, stride, padding, bias=bias
-        )
-
-        self.keep_latent_weight = keep_latent_weight
-        self.binarize_input = binarize_input
-
-        if not self.keep_latent_weight:
-            with torch.no_grad():
-                self.weight.data.sign_()
-                self.bias.data.sign_() if self.bias is not None else None
-
-    def forward(self, inp: Tensor) -> Tensor:
-        if self.keep_latent_weight:
-            weight = binarize(self.weight)
-        else:
-            weight = self.weight
-
-        bias = self.bias if self.bias is None else binarize(self.bias)
-
-        if self.binarize_input:
-            inp = binarize(inp)
-
-        return f.conv2d(
-            inp, weight, bias, self.stride, self.padding, self.dilation, self.groups
-        )
 
 class weightConstraint(object):
     def __init__(self):
@@ -232,26 +184,14 @@ class Reasoning(nn.Module):
             block1 = []
             binary = nn.Linear(layers[il], 
                                             layers[il +1])
-                                            # bias=True, 
-                                            # binarize_input=True)
             
             block1.append(("binary{}".format(il), binary))
             block1.append(("act{}".format(il), nn.Sigmoid()))
-            # if il < len(layers) - 2:
-            #     bn = nn.BatchNorm1d(layers[il +1])
-            #     block1.append(("bn{}".format(il), bn))
 
             self.layers.append(nn.Sequential(OrderedDict(block1)))
 
         self.layers.apply(weightConstraint())
         self.opt = Adam (self.layers.parameters(), lr==self.lr)
-        # MomentumWithThresholdBinaryOptimizer(
-        #             self.binary_parameters(),
-        #             self.non_binary_parameters(),
-        #             ar=self.ar,
-        #             threshold=self.threshold,
-        #             adam_lr=self.lr,
-        #         )
 
 
 
@@ -350,14 +290,9 @@ class ReasoningModel(nn.Module):
             block1 = []
             binary = nn.Linear(layers[il], 
                                             layers[il +1])
-                                            # bias=True, 
-                                            # binarize_input=True)
             
             block1.append(("binary{}".format(il), binary))
             block1.append(("act{}".format(il), nn.Sigmoid()))
-            # if il < len(layers) - 2:
-            #     bn = nn.BatchNorm1d(layers[il +1])
-            #     block1.append(("bn{}".format(il), bn))
 
             self.layers.append(nn.Sequential(OrderedDict(block1)))
 
@@ -376,34 +311,3 @@ class ReasoningModel(nn.Module):
 
 
 
-class ReasoningModel(nn.Module):
-    def __init__(self, 
-            layers= []):
-        super(ReasoningModel, self).__init__()
-
-  
-        self.layers = nn.ModuleList([]) 
-        for il in range(len(layers) - 1):
-            block1 = []
-            binary = nn.Linear(layers[il], 
-                                            layers[il +1])
-                                            # bias=True, 
-                                            # binarize_input=True)
-            
-            block1.append(("binary{}".format(il), binary))
-            block1.append(("act{}".format(il), nn.Sigmoid()))
-            # if il < len(layers) - 2:
-            #     bn = nn.BatchNorm1d(layers[il +1])
-            #     block1.append(("bn{}".format(il), bn))
-
-            self.layers.append(nn.Sequential(OrderedDict(block1)))
-
-        # self.layers.apply(weightConstraint())
-
-    def forward(self, x):
-        input_ = x[0][0]
-        outputs = []
-        for i, block in enumerate(self.layers):
-            input_ = block(input_)
-            outputs.append(input_)
-        return outputs

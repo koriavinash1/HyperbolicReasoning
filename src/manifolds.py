@@ -1,6 +1,8 @@
 from torch.nn import Parameter
 from src.mathutils import artanh, tanh
 import torch
+#  The following functions and class are forked  from https://github.com/HazyResearch/hgcn
+ # https://arxiv.org/abs/1910.12933 (Hyperbolic Convolutional Neural Networks)
 
 class Manifold(object):
     """
