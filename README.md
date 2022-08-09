@@ -11,7 +11,7 @@ pip3 install -r requirements.py
 
 ## Steps
 
->> Pre-training Classifiers
+> Pre-training Classifiers
 
 ```
 cd Classifiers
@@ -22,7 +22,7 @@ chmod +x train.sh
 ./train.sh 
 ```
 
->> Traing Explainer Model
+> Traing Explainer Model
 
 ```
 # change data and logs directory in main.py (in function arguments)
@@ -31,8 +31,8 @@ chmod +x train.sh
 python main.py
 ```
 
->> Generate Explainations
+> Generate Explanations
 
 ```
-# Follow Inference notebook in playground to generate explainations
+# Follow Inference notebook in playground to generate explanations
 ```
