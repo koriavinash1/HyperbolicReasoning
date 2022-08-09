@@ -3,13 +3,14 @@ import torch.nn as nn
 import torch.utils.model_zoo as model_zoo
 from collections import OrderedDict
 from Classifier import model
+
 model_urls = {
-    'afhq': '/vol/biomedic2/agk21/PhDLogs/codes/HyperbolicReasoning/Classifier/Logs/AFHQ/best.pth',
-    'mnistti': '/vol/biomedic2/agk21/PhDLogs/codes/HyperbolicReasoning/Classifier/Logs/MNIST/best.pth',
-    'mnistit': '/vol/biomedic2/agk21/PhDLogs/codes/HyperbolicReasoning/Classifier/Logs/MNIST/best.pth',
-    'mnistts': '/vol/biomedic2/agk21/PhDLogs/codes/HyperbolicReasoning/Classifier/Logs/MNIST/best.pth',
-    'mnisttswi': '/vol/biomedic2/agk21/PhDLogs/codes/HyperbolicReasoning/Classifier/Logs/MNIST/best.pth',
-    'mnisttswiv2': '/vol/biomedic2/agk21/PhDLogs/codes/HyperbolicReasoning/Classifier/Logs/MNIST/best.pth',
+    'afhq': '../TrainedClassifier/Logs/AFHQ/best.pth',
+    'mnistti': '../TrainedClassifier/Logs/MNIST/best.pth',
+    'mnistit': '../TrainedClassifier/Logs/MNIST/best.pth',
+    'mnistts': '../TrainedClassifier/Logs/MNIST/best.pth',
+    'mnisttswi': '../TrainedClassifier/Logs/MNIST/best.pth',
+    'mnisttswiv2': '../TrainedClassifier/Logs/MNIST/best.pth',
 }
 
 class SVHN(nn.Module):

@@ -13,7 +13,7 @@ import numpy as np
 
 
 def train_from_folder(\
-                      data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MorphoMNISTv0/TI/data',
+                      data_root='../../datasets/MorphoMNISTv0/TI/data',
                       logs_root='LOGS',
                       name='MNISTL2',
                       image_size=(32,32),
@@ -70,6 +70,8 @@ def train_from_folder(\
     with open(os.path.join(logs_root, name, 'exp-config.json'), 'w') as f:
         json.dump(model_args, f, indent=4)
 
+
+    # load the classifier for generating explainations
     if data_root.lower().__contains__('mnist'):
         if data_root.__contains__('TSWIv2'):
             net = mnist(32, 'tswiv2')
