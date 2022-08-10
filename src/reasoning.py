@@ -18,7 +18,7 @@ T = TypeVar("T")
 _scalar_or_tuple_2_t = Union[T, Tuple[T, T]]
 _size_2_t = _scalar_or_tuple_2_t[int]
 
-# Quantizers
+# Binarise function
 # This class is taken from https://github.com/bsridatta/Rethinking-Binarized-Neural-Network-Optimization/blob/master/research_seed/bytorch/binary_neural_network.py
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 class Binarize(Function):
@@ -159,6 +159,7 @@ class BinaryLinear(nn.Linear):
 
 
 class weightConstraint(object):
+    # Weight contraint
     def __init__(self):
         pass
     
@@ -168,144 +169,9 @@ class weightConstraint(object):
             w=w.clamp(0,0.1)
             module.weight.data=w
 
-class Reasoning(nn.Module):
-    def __init__(self, 
-            layers= [],
-            ar = 1e-4,
-            lr = 1e-3,
-            threshold = 1e-8):
-        super(Reasoning, self).__init__()
-
-        self.ar = ar
-        self.lr = lr 
-        self.threshold = threshold
-        self.layers = nn.ModuleList([]) 
-        for il in range(len(layers) - 1):
-            block1 = []
-            binary = nn.Linear(layers[il], 
-                                            layers[il +1])
-            
-            block1.append(("binary{}".format(il), binary))
-            block1.append(("act{}".format(il), nn.Sigmoid()))
-
-            self.layers.append(nn.Sequential(OrderedDict(block1)))
-
-        self.layers.apply(weightConstraint())
-        self.opt = Adam (self.layers.parameters(), lr==self.lr)
-
-
-
-    def binary_parameters(self):
-        for name, layer in self.named_parameters():
-            if "binary" in name.lower():
-                yield layer
-
-    def non_binary_parameters(self):
-        for name, layer in self.named_parameters():
-            if "bn" in name.lower():
-                yield layer
-
-    def train_step(self, fs, idx, y):
-        self.opt.zero_grad()
-        be_loss = 0
-        ce_loss = 0
-
-
-        fs_ = [torch.zeros(fs[0].shape[0], xi.shape[1]).to(y.device) for xi,_ in idx]
-        
-        for i, (_, xi) in enumerate(idx):
-            xi = xi.view(fs[0].shape[0], -1)
-            t_ = f.adaptive_avg_pool2d(fs[i], (1,1)).view(fs_[i].shape[0], -1).detach()
-            for ii in range(fs[0].shape[0]):
-                fs_[i][ii, xi[ii]] = t_[ii]
-            
-            fs_[i] = fs_[i].contiguous()
-
-
-        input_ = fs_[0]
-        for i, block in enumerate(self.layers[:-1]):
-            input_ = block(input_)
-            be_loss += self.bce_loss(input_, fs_[i +1])
-
-        y_ = self.layers[-1](input_)
-        ce_loss = self.ce_loss(y_, y)
-
-
-        loss = 1*ce_loss + 2*be_loss
-        all_linear1_params = torch.cat([x.view(-1) for x in self.parameters()])
-        l1_regularization = torch.norm(all_linear1_params, 1)
-
-        loss += 0.0001*l1_regularization
-        loss.backward()
-        self.opt.step() 
-        return loss.detach()
-
-
-    def ce_loss(self, p, y):
-        return f.cross_entropy(p, y)#, label_smoothing=0.001)
-
-    def bce_loss(self, p, y):
-        return f.binary_cross_entropy_with_logits(p, y)
-
-    @torch.no_grad()
-    def val_step(self, fs, idx, y):
-        be_loss = 0
-        ce_loss = 0
-        
-        fs_ = [torch.zeros(fs[0].shape[0], xi.shape[1]).to(y.device) for xi,_ in idx]
-        
-        for i, (_, xi) in enumerate(idx):
-            xi = xi.view(fs[0].shape[0], -1)
-            t_ = f.adaptive_avg_pool2d(fs[i], (1,1)).view(fs_[i].shape[0], -1).detach()
-            for ii in range(fs[0].shape[0]):
-                fs_[i][ii, xi[ii]] = t_[ii]
-            
-            fs_[i] = fs_[i].contiguous()
-
-
-        input_ = fs_[0]
-        for i, block in enumerate(self.layers[:-1]):
-            input_ = block(input_)
-            be_loss += self.bce_loss(input_, fs_[i +1])
-
-        y_ = self.layers[-1](input_)
-        ce_loss = self.ce_loss(y_, y)
-
-
-
-        loss = ce_loss + be_loss
-        return y_, loss
  
 
 
-
-class ReasoningModel(nn.Module):
-    def __init__(self, 
-            layers= []):
-        super(ReasoningModel, self).__init__()
-
-  
-        self.layers = nn.ModuleList([]) 
-        for il in range(len(layers) - 1):
-            block1 = []
-            binary = nn.Linear(layers[il], 
-                                            layers[il +1])
-            
-            block1.append(("binary{}".format(il), binary))
-            block1.append(("act{}".format(il), nn.Sigmoid()))
-
-            self.layers.append(nn.Sequential(OrderedDict(block1)))
-
-        # self.layers.apply(weightConstraint())
-
-    def forward(self, x):
-        input_ = x[0][0]
-        outputs = []
-        for i, block in enumerate(self.layers):
-            input_ = block(input_)
-            outputs.append(input_)
-        return outputs
-        
 
  
 

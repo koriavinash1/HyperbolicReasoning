@@ -40,7 +40,7 @@ class HypLinear(nn.Module):
     def reset_parameters(self):
         init.xavier_uniform_(self.weight, gain=math.sqrt(2))
         init.constant_(self.bias, 0)
-
+    # Projection contraints
     def proj(self, x):
         d = x.size(-1) - 1
         y = x.narrow(-1, 1, d)
@@ -65,7 +65,7 @@ class HypLinear(nn.Module):
         vals = torch.zeros_like(u)
         vals[:, 0:1] = narrowed
         return u - vals
-
+    # Exponential Mapping
     def expmap(self, u, x):
         
         normu = self.minkowski_norm(u)
@@ -73,7 +73,7 @@ class HypLinear(nn.Module):
         theta = torch.clamp(theta, min=self.min_norm)
         result = cosh(theta) * x + sinh(theta) * u / theta
         return self.proj(result)
-
+    # Logarithmic mapping
     def logmap(self, x, y):
         xy = torch.clamp(self.minkowski_dot(x, y), max=-self.eps[x.dtype]) 
         u = y + xy * x
@@ -95,7 +95,7 @@ class HypLinear(nn.Module):
         alpha = torch.sum(y_normalized * u[:, 1:], dim=1, keepdim=True) 
         res = u - alpha * v
         return self.proj_tan(res, x)
-
+    # Exponential mapping at origin of hyperboloid
     def expmap0(self, u):
         d = u.size(-1) - 1
         x = u.narrow(-1, 1, d).view(-1, d)
@@ -106,7 +106,7 @@ class HypLinear(nn.Module):
         res[:, 0:1] = cosh(theta)
         res[:, 1:] =  sinh(theta) * x / x_norm
         return self.proj(res)
-
+    # Logarithmic  mapping at origin of hyperboloid
     def logmap0(self, x):
         d = x.size(-1) - 1
         y = x.narrow(-1, 1, d).view(-1, d)
@@ -116,7 +116,7 @@ class HypLinear(nn.Module):
         theta = torch.clamp(x[:, 0:1], min=1.0 + self.eps[x.dtype])
         res[:, 1:] = arcosh(theta) * y / y_norm
         return res
-
+    
     def minkowski_dot(self, x, y, keepdim=True):
         res = torch.sum(x * y, dim=-1) - 2 * x[..., 0] * y[..., 0]
         if keepdim:
@@ -126,12 +126,13 @@ class HypLinear(nn.Module):
     def minkowski_norm(self, u, keepdim=True):
         dot = self.minkowski_dot(u, u, keepdim=keepdim)
         return torch.sqrt(torch.clamp(dot, min=self.eps[u.dtype]))
-
+    # Mobius addition using parallel transport from origin
     def mobius_add(self, x, y):
         u = self.logmap0(y)
         v = self.ptransp0(x, u)
         return self.expmap(v, x)
 
+    # Mobius multiplication 
     def mobius_matvec(self, m, x):
         u = self.logmap0(x)
         mu = u @ m.transpose(-1, -2)

@@ -13,6 +13,7 @@ import plotly.graph_objects as go
 
 
 class visualSemantics(object):
+    # This class extracts the visual sematic of a single codebook symbol with an attention region
     def __init__(self, 
                     decoder,
                     reasoning_graph = None,
@@ -23,6 +24,7 @@ class visualSemantics(object):
                     ):
 
         self.device = device
+        # Decoder initialisation
         with torch.no_grad():
             self.decoder = decoder.to(self.device).eval() 
             self.feature_extractor = feature_extractor.to(self.device).eval()
@@ -46,7 +48,7 @@ class visualSemantics(object):
     @torch.no_grad()
     def recon(self, features):
         return self.decoder(features)
-
+    # Visualise effect of a codebook symbol in output image
     def effect(self, features, symbols):
         xorig = self.recon(features)
         feature_clone = features.clone()
@@ -57,7 +59,7 @@ class visualSemantics(object):
 
     def mask(self, effect):
         return 1.*(effect > self.threshold)
-
+    # Get all symbols responsible for activation symbols of interest using image level tree
     def semantics(self, x, node_name):
 
         if node_name not in self.reasoning_nx:
@@ -95,7 +97,7 @@ class visualSemantics(object):
         effect = self.effect(features[0], np.array(mapped_features))
         return effect
 
-
+    # Visual rule extraction
     def visual_rule(self, x, rule):
         target_node, body_nodes = rule.split(' <- ')
         body_nodes = body_nodes.split(',')

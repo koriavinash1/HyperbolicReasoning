@@ -42,6 +42,7 @@ def get_transparent_cmap(cmap):
 
 
 class InductiveReasoningDT(object):
+    # This class is used to create a class level and image level tree extracted from a knowledge tree
     def __init__(self,  
                     data,
                     ncodebook_features,
@@ -88,6 +89,7 @@ class InductiveReasoningDT(object):
             self.filter_grpah(train_loader)
             print (self.nx_graph.number_of_edges())
 
+        # Visual semantics
         self.vsemantics = visualSemantics(decoder=decoder,
                                         reasoning_graph=self.nx_graph,
                                         feature_extractor=self.feature_extractor,
@@ -116,7 +118,7 @@ class InductiveReasoningDT(object):
                     y.cpu().numpy(), \
                     [sf.cpu().numpy() for sf in sampled_features]
 
-
+    # Create tree graphs
     def define_nx_graph(self):
         G = nx.DiGraph()
         
@@ -160,7 +162,8 @@ class InductiveReasoningDT(object):
         nx.draw(G, pos_, edge_color='b', with_labels = True, node_size=1000) 
         plt.savefig('global-tree.png')
         return G
-    
+     
+    # Filter graph
 
     def filter_grpah(self, train_loader):
         sampled_symbols = {i:[] for i in range(len(self.ncodebook_features))}
@@ -198,7 +201,7 @@ class InductiveReasoningDT(object):
                 return_symbols.append(symbol)
         return return_symbols
 
-
+    # Class tree generation    
     def get_class_tree(self, class_idx, savepath='.'):
         G = nx.DiGraph()
         max_layers = len(self.ncodebook_features)+1
@@ -240,7 +243,7 @@ class InductiveReasoningDT(object):
         plt.savefig(os.path.join(savepath, f'class-{class_idx}-tree.png'))
         return G
 
-
+    # Image tree generation
     def get_local_tree(self, class_idx, x, savepath='.'):
         G = nx.DiGraph()
         sampled_symbols, _, _ = self.forward(x)
@@ -289,7 +292,7 @@ class InductiveReasoningDT(object):
         plt.savefig(os.path.join(savepath, 'local-tree.png'))
         return G
 
-
+    # Generate and overlay FOL chain rules
     def query(self, class_idx, visual=None, local = False, overlay=False, save_path=None):
         if local:
             graph = self.get_local_tree(class_idx, visual)
@@ -332,7 +335,7 @@ class InductiveReasoningDT(object):
 
         return heirarchical_rules
     
-    
+    # Plot trees
     def show(self, rule, target, body, save_path=None, cmap='coolwarm', overlay=None):
         
         def check(image, normalize=True):

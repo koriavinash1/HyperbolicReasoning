@@ -11,7 +11,7 @@ import torch.distributed as dist
 
 import numpy as np
 
-
+# This is the main function to run training of the discrete surrogate model
 def train_from_folder(\
                       data_root='../../datasets/MorphoMNISTv0/TI/data',
                       logs_root='LOGS',

@@ -28,7 +28,7 @@ import matplotlib.patches as mpatches
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
+# Trainer class
 class Trainer():
     def __init__(self,
                     classifier,
@@ -88,7 +88,7 @@ class Trainer():
         self.dlr = decoder_learning_rate
         self.wd = 0.00001
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+        # Extract features from pretrained classifier
         with torch.no_grad():
             self.feature_extractor = classifier.features.to(self.device).eval()
             self.classifier_baseline_ = classifier.classifier.to(self.device).eval()
@@ -121,7 +121,7 @@ class Trainer():
 
             
 
-
+        # Optimiser for binary weights
         self.opt = MomentumWithThresholdBinaryOptimizer(
                          list(self.modelclass.reasoning_parameters()) + list(self.classifier_quantized.parameters()),
                          list(self.modelclass.other_parameters()),
@@ -373,12 +373,12 @@ class Trainer():
         min_recon = np.inf
 
         plot = True
-
+        # Plot Poincare graph for 2D embeddinggs
         for iepoch in range(self.nepochs):
 
             self.training_step(train_loader, iepoch)
             loss, rloss, f1, acc, attnblocks, codebooks= self.validation_step(valid_loader, iepoch)
-
+          
             if plot and ((iepoch % 1) ==0):
                 plt.figure(figsize=(10, 10))
                 for i in range(len(attnblocks)):

@@ -100,14 +100,6 @@ class ResnetBlock2D(nn.Module):
         return x+h
 
 
-class HLoss(nn.Module):
-    def __init__(self):
-        super(HLoss, self).__init__()
-
-    def forward(self, x):
-        b = F.softmax(x, dim=1) * F.log_softmax(x, dim=1)
-        b = -1.0 * b.sum()
-        return b
 
 class Decoder(nn.Module):
         def __init__(self, *, ch = 32, 
@@ -197,35 +189,6 @@ class Decoder(nn.Module):
             return  nonlinearity(x6)
 
 
-class VQmodulator(nn.Module):
-
-    def __init__(self, *, features,dropout=0.0, z_channels, codebooksize, device):
-        super(VQmodulator, self).__init__()
-        self.norm1 = nn.BatchNorm2d(features, affine=True)
-
-        self.conv1 = torch.nn.Conv2d(features,
-                                       z_channels,
-                                       kernel_size=1,
-                                       stride=1,
-                                       )
-
-        self.norm2 = nn.BatchNorm2d(z_channels, affine=True)
-        self.conv2 = torch.nn.Conv2d(z_channels,
-                                      z_channels,
-                                      kernel_size=1,
-                                      stride=1,
-                                      )
-        
-        self.quantize = VectorQuantizer2DHS(device, codebooksize, z_channels, beta=1.0, sigma=0.1)
-
-    def forward(self, x):
-        x1 = self.norm1(x)
-        x1 = self.conv1(x1)
-        x2 = self.norm2(x1)
-        x2 = self.conv2(x1)
-        z_q, loss, distances, info, zqf, ce, td, hrc, r = self.quantize(x2)
-
-        return loss, z_q, zqf, ce, td, hrc, r, None, None
 
 
 class GeometricVQ(nn.Module):
@@ -266,7 +229,7 @@ class GeometricVQ(nn.Module):
         self.embedding.weight.data.copy_(points_in_manifold).requires_grad=True
         self.ed = lambda x: [torch.norm(x[i]) for i in range(x.shape[0])]
         
-        # Hyperboloid linear layers
+        # Hyperboloid linear layer applied to each codebook vector before learning weighted edges between features
         self.h =  HNNLayer(e_dim, e_dim, 0, True)
 
 
@@ -531,6 +494,7 @@ class GeometricVQ(nn.Module):
 
 
 class weightConstraint(object):
+    # Contrain weights between 0 and 1
     def __init__(self):
         pass
 
@@ -544,7 +508,11 @@ class weightConstraint(object):
 
 
 class HierarchyVQmodulator(nn.Module):
-
+    """
+    This class creates a hierarchy of codebook embedded in Poincare space with weighted edges connecting the embeddings between consecutive codebooks.
+    Edges determined by a binary weights
+    Feature modulation applied before inputting into Euclidean codebook
+    """
     def __init__(self, *, 
                     features, 
                     z_channels, 
@@ -607,7 +575,7 @@ class HierarchyVQmodulator(nn.Module):
                                             ))
 
         # ====================================================================
-        # attention layers
+        # Feature size at each abstraction level
         if self.trim:
             zchannels = [(z_channels//(2**i), z_channels//(2**(i+1))) for i in range(len(codebooksize) - 1)]
         else:
@@ -616,11 +584,12 @@ class HierarchyVQmodulator(nn.Module):
 
         self.featureattns = nn.ModuleList([])
         self.hyperbolicLayers = nn.ModuleList([])
+        # Feature attention layers
         for zch in zchannels:
             self.featureattns.append(torch.nn.Linear(zch[0],zch[1]))
             self.hyperbolicLayers.append(HNNLayer(emb_dim, emb_dim,  0, True ))
 
-
+        # Reduce feature size
         if self.trim:
             self.trimLayers = nn.ModuleList([])
             for zch in zchannels:
@@ -632,6 +601,7 @@ class HierarchyVQmodulator(nn.Module):
      
 
         wc = weightConstraint()
+        # Binary attention weights between Hyperbolic codebooks
         if self.reasoning:
             self.reasoningLayers = nn.ModuleList([])
             self.Aggregation = nn.ModuleList([])
@@ -719,7 +689,7 @@ class HierarchyVQmodulator(nn.Module):
         y =  torch.clamp(x ** 2, min=1.0 + self.epsilon)
         z = torch.sqrt(y - 1)
         return torch.log(x + z)
-    
+    # Feature attention function
     def attention(self, y, conv=None, h = None):
 
         if not (conv is None):
@@ -763,7 +733,7 @@ class HierarchyVQmodulator(nn.Module):
         qinput = x2
         total_loss = 0
 
-        # logging parameters 
+        # Foward pass for knowledge tree generation
         for i in range(len(self.quantizeBlocks)):
             if i == 0:
                 z_q, loss, sampled_idx, cvE, cdE, \
@@ -828,36 +798,6 @@ class HierarchyVQmodulator(nn.Module):
                     cvE, cdE, attentionList, projections)
 
 
-class modulator(nn.Module):
-
-    def __init__(self, *,
-                 features,
-                 z_channels,
-                 ):
-        super(modulator, self).__init__()
-        self.norm1 = nn.BatchNorm2d(features, affine=True)
-
-        self.conv1 = torch.nn.Conv2d(features,
-                                     z_channels,
-                                     kernel_size=3,
-                                     padding=1,
-                                     stride=1,
-                                     )
-
-        self.norm2 = nn.BatchNorm2d(z_channels, affine=True)
-        self.conv2 = torch.nn.Conv2d(z_channels,
-                                     z_channels,
-                                     kernel_size=3,
-                                     padding=1,
-                                     stride=1,
-                                     )
-    def forward(self, x):
-        x1 = self.norm1(x)
-        x1 = self.conv1(x1)
-        x2 = self.norm2(x1)
-        x2 = self.conv2(x2)
-
-        return x2
 
 
 
