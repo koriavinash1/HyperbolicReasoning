@@ -7,7 +7,6 @@ import fire
 import json
 
 from src.layer import Decoder,  HierarchyVQmodulator
-from src.clsmodel import mnist, afhq #, stl10
 from src.loss import recon_loss, ce_loss
 from src.dataset import get
 from src.radam import RiemannianAdam
@@ -79,6 +78,7 @@ class Trainer():
         self.required_channels = latent_dim
         self.trim = trim 
         self.reasoning = reasoning
+        
 
         self.__init__dl()
         print(torch.cuda.is_available())

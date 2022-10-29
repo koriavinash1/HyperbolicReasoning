@@ -5,7 +5,7 @@ from IPython import embed
 import os
 import numpy as np
 import torch.utils.data as data
-
+import pandas as pd
 from PIL import Image
 
 
@@ -73,6 +73,18 @@ def make_dataset(dir, class_to_idx):
 
     return images
 
+
+def make_csv_dataset(root, csv_path):
+    data = pd.read_csv(csv_path)
+    images = []
+    class_to_idx, classes = {'Normal': 1, 'Abnormal': 0}, ['Normal', 'Abnormal']
+    for idx, _ in enumerate(range(len(data))):
+        img_path = root + data.loc[idx, 'path_preproc']
+        img_label = int(data.loc[idx, 'No Finding'] == 1)
+        images.append((img_path, np.eye(2)[img_label]))
+    return images, class_to_idx, classes
+
+
 class DataGenerator(data.Dataset):
     """
 
@@ -92,10 +104,15 @@ class DataGenerator(data.Dataset):
 
     def __init__(self, root, 
                 transform=None, 
+                csv_path = None,
                 loader=default_loader):
-                
-        classes, class_to_idx = find_classes(root)
-        imgs = make_dataset(root, class_to_idx)
+        
+        if (csv_path is None):
+            classes, class_to_idx = find_classes(root)
+            imgs = make_dataset(root, class_to_idx)
+        else:
+            imgs, class_to_idx, classes = make_csv_dataset(root, csv_path)
+
         if len(imgs) == 0:
             raise(RuntimeError("Found 0 images in subfolders of: " + root + "\n"
                                "Supported image extensions are: " + ",".join(IMG_EXTENSIONS)))
@@ -128,20 +145,28 @@ class DataGenerator(data.Dataset):
     def __len__(self):
         return len(self.imgs)
 
+
 def get(batch_size, 
         data_root='pytorch-data/', 
         train=True, 
         val=True, **kwargs):
 
+    train_csv_path = None
+    test_csv_path = None
+    if data_root.__contains__('mimic'):
+        train_csv_path = '/vol/biomedic2/agk21/PhDLogs/datasets/MIMIC/mimic.sample.train.csv'
+        test_csv_path = '/vol/biomedic2/agk21/PhDLogs/datasets/MIMIC/mimic.sample.test.csv'
+
     num_workers = kwargs.setdefault('num_workers', 1)
     input_size = kwargs.pop('input_size', None)
 
-    print("Building STL10 data loader with {} workers".format(num_workers))
+    print("Building data loader with {} workers".format(num_workers))
     ds = []
     if train:
         train_loader = torch.utils.data.DataLoader(
             DataGenerator(
-                root=os.path.join(data_root, 'training'),
+                root = data_root if data_root.__contains__('mimic') else os.path.join(data_root, 'training'),
+                csv_path=train_csv_path,
                 transform=transforms.Compose([
                     # affine transformation
                     transforms.RandomAffine(5, 
@@ -158,7 +183,8 @@ def get(batch_size,
     if val:
         test_loader = torch.utils.data.DataLoader(
             DataGenerator(
-                root=os.path.join(data_root, 'testing'),
+                root= data_root if data_root.__contains__('mimic') else os.path.join(data_root, 'testing'),
+                csv_path=test_csv_path,
                 transform=transforms.Compose([
                     transforms.Resize(input_size),
                     transforms.ToTensor(),

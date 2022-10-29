@@ -5,7 +5,7 @@ import json
 from tqdm import tqdm
 from src.train import Trainer
 
-from clsmodel import mnist, stl10, afhq, vafhq
+from clsmodel import mnist, stl10, afhq, vafhq, mimic
 import torch
 import torch.distributed as dist
 
@@ -73,23 +73,14 @@ def train_from_folder(\
 
     # load the classifier for generating explainations
     if data_root.lower().__contains__('mnist'):
-        if data_root.__contains__('TSWIv2'):
-            net = mnist(32, 'tswiv2')
-        elif data_root.__contains__('TSWI'):
-            net = mnist(32, 'tswi')
-        elif data_root.__contains__('TS'):
-            net = mnist(32, 'ts')
-        elif data_root.__contains__('TI'):
-            net = mnist(32, 'ti')
-        elif data_root.__contains__('IT'):
-            net = mnist(32, 'it')
-        else:
-            raise ValueError()
+        net = mnist(32, True)
     elif data_root.lower().__contains__('stl'):
         net = stl10(3, True)
     elif data_root.lower().__contains__('afhq'):
-        # net = afhq(3, True)
-        net = vafhq(32, True)
+        net = afhq(3, True)
+        # net = vafhq(32, True)
+    elif data_root.lower().__contains__('mimic'):
+        net = mimic(3, True)
     else:
         raise ValueError("explainee model not found")
 

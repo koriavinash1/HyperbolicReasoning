@@ -5,7 +5,7 @@ from IPython import embed
 import os
 import numpy as np
 import torch.utils.data as data
-
+import pandas as pd
 from PIL import Image
 
 
@@ -44,8 +44,10 @@ IMG_EXTENSIONS = ['.tif','.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm']
 
 def is_image_file(filename):
     """Checks if a file is an image.
+
     Args:
         filename (string): path to a file
+
     Returns:
         bool: True if the filename ends with a known image extension
     """
@@ -71,8 +73,21 @@ def make_dataset(dir, class_to_idx):
 
     return images
 
+
+def make_csv_dataset(root, csv_path):
+    data = pd.read_csv(csv_path)
+    images = []
+    class_to_idx, classes = {'Normal': 1, 'Abnormal': 0}, ['Normal', 'Abnormal']
+    for idx, _ in enumerate(range(len(data))):
+        img_path = root + data.loc[idx, 'path_preproc']
+        img_label = int(data.loc[idx, 'No Finding'] == 1)
+        images.append((img_path, np.eye(2)[img_label]))
+    return images, class_to_idx, classes
+
+
 class DataGenerator(data.Dataset):
     """
+
     Args:
         root (string): Root directory path.
         transform (callable, optional): A function/transform that  takes in an PIL image
@@ -80,6 +95,7 @@ class DataGenerator(data.Dataset):
         target_transform (callable, optional): A function/transform that takes in the
             target and transforms it.
         loader (callable, optional): A function to load an image given its path.
+
      Attributes:
         classes (list): List of the class names.
         class_to_idx (dict): Dict with items (class_name, class_index).
@@ -88,18 +104,22 @@ class DataGenerator(data.Dataset):
 
     def __init__(self, root, 
                 transform=None, 
+                csv_path = None,
                 loader=default_loader):
-                
-        classes, class_to_idx = find_classes(root)
-        imgs = make_dataset(root, class_to_idx)
+        
+        if (csv_path is None):
+            classes, class_to_idx = find_classes(root)
+            imgs = make_dataset(root, class_to_idx)
+        else:
+            imgs, class_to_idx, classes = make_csv_dataset(root, csv_path)
+
         if len(imgs) == 0:
             raise(RuntimeError("Found 0 images in subfolders of: " + root + "\n"
                                "Supported image extensions are: " + ",".join(IMG_EXTENSIONS)))
 
         self.root = root
-        self.imgs = imgs#[:500]
-        np.random.shuffle(self.imgs)
-        self.classes = classes
+        self.imgs = imgs#[:50]
+        self.classes = classes#[:50]
         self.num_class = len(classes)
         self.num_channels = 3
         self.class_to_idx = class_to_idx
@@ -110,6 +130,7 @@ class DataGenerator(data.Dataset):
         """
         Args:
             index (int): Index
+
         Returns:
             tuple: (image, target) where target is class_index of the target class.
         """
@@ -124,10 +145,17 @@ class DataGenerator(data.Dataset):
     def __len__(self):
         return len(self.imgs)
 
+
 def get(batch_size, 
         data_root='pytorch-data/', 
         train=True, 
         val=True, **kwargs):
+
+    train_csv_path = None
+    test_csv_path = None
+    if data_root.__contains__('mimic'):
+        train_csv_path = '/vol/biomedic2/agk21/PhDLogs/datasets/MIMIC/mimic.sample.train.csv'
+        test_csv_path = '/vol/biomedic2/agk21/PhDLogs/datasets/MIMIC/mimic.sample.test.csv'
 
     num_workers = kwargs.setdefault('num_workers', 1)
     input_size = kwargs.pop('input_size', None)
@@ -137,12 +165,13 @@ def get(batch_size,
     if train:
         train_loader = torch.utils.data.DataLoader(
             DataGenerator(
-                root=os.path.join(data_root, 'training'),
+                root = data_root if data_root.__contains__('mimic') else os.path.join(data_root, 'training'),
+                csv_path=train_csv_path,
                 transform=transforms.Compose([
                     # affine transformation
-                    # transforms.RandomAffine(5, 
-                    #                 translate=(0.1, 0.1), 
-                    #                 scale=(0.8, 1.0), shear=0.0),
+                    transforms.RandomAffine(5, 
+                                    translate=(0.1, 0.1), 
+                                    scale=(0.8, 1.0), shear=0.0),
                     transforms.Resize(input_size),
                     # transforms.RandomHorizontalFlip(),
                     transforms.ToTensor(),
@@ -154,7 +183,8 @@ def get(batch_size,
     if val:
         test_loader = torch.utils.data.DataLoader(
             DataGenerator(
-                root=os.path.join(data_root, 'testing'),
+                root= data_root if data_root.__contains__('mimic') else os.path.join(data_root, 'testing'),
+                csv_path=test_csv_path,
                 transform=transforms.Compose([
                     transforms.Resize(input_size),
                     transforms.ToTensor(),

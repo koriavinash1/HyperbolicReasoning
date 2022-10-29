@@ -5,12 +5,10 @@ from collections import OrderedDict
 from Classifier import model
 
 model_urls = {
-    'afhq': '../TrainedClassifier/Logs/AFHQ/best.pth',
-    'mnistti': '../TrainedClassifier/Logs/MNIST/best.pth',
-    'mnistit': '../TrainedClassifier/Logs/MNIST/best.pth',
-    'mnistts': '../TrainedClassifier/Logs/MNIST/best.pth',
-    'mnisttswi': '../TrainedClassifier/Logs/MNIST/best.pth',
-    'mnisttswiv2': '../TrainedClassifier/Logs/MNIST/best.pth',
+    'afhq': 'Classifier/Logs/AFHQ/best.pth',
+    'mnist': 'Classifier/Logs/MNIST/best.pth',
+    'stl10' : 'Classifier/Logs/STL10/best.pth',
+    'mimic': 'Classifier/Logs/MIMIC/best.pth'
 }
 
 class SVHN(nn.Module):
@@ -108,6 +106,20 @@ def afhq(n_channel, pretrained=None):
         net.load_state_dict(state_dict)
 
         print ("AFHQ weights loaded ............")
+    return net
+
+
+
+def mimic(n_channel, pretrained=None):
+    nclass = 3
+    net = model.DenseNet121(num_channel=n_channel, classCount=nclass)
+    if pretrained is not None:
+        m = torch.load(model_urls['mimic'])
+        state_dict = m.state_dict() if isinstance(m, nn.Module) else m
+        assert isinstance(state_dict, (dict, OrderedDict)), type(state_dict)
+        net.load_state_dict(state_dict)
+
+        print ("mimic weights loaded ............")
     return net
 
 

@@ -186,7 +186,7 @@ class Decoder(nn.Module):
             x5 = self.norm_out(x4)
             x6 = self.conv_out(x5)
 
-            return  nonlinearity(x6)
+            return  torch.sigmoid(x6)
 
 
 

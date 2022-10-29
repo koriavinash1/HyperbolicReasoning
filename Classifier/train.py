@@ -1,7 +1,6 @@
 import argparse
 import os
 import time
-from utee import misc
 
 import torch
 import torch.nn.functional as F
@@ -29,16 +28,14 @@ parser.add_argument('--log_interval', type=int, default=20,  help='how many batc
 parser.add_argument('--test_interval', type=int, default=5,  help='how many epochs to wait before another test')
 parser.add_argument('--logdir', default='log/default', help='folder to save to the log')
 parser.add_argument('--decreasing_lr', default='80,120', help='decreasing strategy')
+parser.add_argument('--binary', type=bool, default=False)
 args = parser.parse_args()
-misc.logger.init(args.logdir, 'train_log')
-print = misc.logger.info
+
 
 # select gpu
-args.gpu = misc.auto_select_gpu(utility_bound=0, num_gpu=args.ngpu, selected_gpus=args.gpu)
-args.ngpu = len(args.gpu)
+args.ngpu = 1
 
 # logger
-misc.ensure_dir(args.logdir)
 print("=================FLAGS==================")
 for k, v in args.__dict__.items():
     print('{}: {}'.format(k, v))
@@ -76,6 +73,9 @@ decreasing_lr = list(map(int, args.decreasing_lr.split(',')))
 print('decreasing_lr: ' + str(decreasing_lr))
 best_acc, old_file = 0, None
 t_begin = time.time()
+
+os.makedirs(args.logdir, exist_ok=True)
+
 try:
     # ready to go
     for epoch in range(args.epochs):
@@ -84,13 +84,20 @@ try:
             optimizer.param_groups[0]['lr'] *= 0.1
         for batch_idx, (data, target) in enumerate(train_loader):
             indx_target = target.clone()
+
+            if args.binary:
+                indx_target = target.clone()[:, 0] # abnormal 1, normal 0
+
             if args.cuda:
                 data, target = data.cuda(), target.cuda()
             data, target = Variable(data), Variable(target)
 
             optimizer.zero_grad()
             output = model(data)
-            loss = F.cross_entropy(output, target)
+            if args.nclasses > 1:
+                loss = F.cross_entropy(output, target)
+            else:
+                loss = F.binary_cross_entropy(torch.sigmoid(output), target.view(-1, 1))
             loss.backward()
             optimizer.step()
 
@@ -106,9 +113,10 @@ try:
         speed_epoch = elapse_time / (epoch + 1)
         speed_batch = speed_epoch / len(train_loader)
         eta = speed_epoch * args.epochs - elapse_time
-        print("Elapsed {:.2f}s, {:.2f} s/epoch, {:.2f} s/batch, ets {:.2f}s".format(
+        print(args.data_root, "Elapsed {:.2f}s, {:.2f} s/epoch, {:.2f} s/batch, ets {:.2f}s".format(
             elapse_time, speed_epoch, speed_batch, eta))
-        misc.model_snapshot(model, os.path.join(args.logdir, 'latest.pth'))
+        
+        torch.save(model.state_dict(), os.path.join(args.logdir, 'latest.pth'))
 
         if epoch % args.test_interval == 0:
             model.eval()
@@ -116,27 +124,36 @@ try:
             correct = 0
             for data, target in test_loader:
                 indx_target = target.clone()
+
+                if args.binary:
+                    indx_target = target.clone()[:, 0] # abnormal 1, normal 0
+
+
                 if args.cuda:
-                    data, target = data.cuda(), target.cuda().long().squeeze()
+                    data, target = data.cuda(), target.cuda()
                 data, target = Variable(data, volatile=True), Variable(target)
                 output = model(data)
-                test_loss += F.cross_entropy(output, target).item()
+                if args.nclasses > 1:
+                    test_loss += F.cross_entropy(output, target).item()
+                else:
+                    test_loss += F.binary_cross_entropy(torch.sigmoid(output), target.view(-1, 1)).item()
+
                 pred = output.data.max(1)[1]  # get the index of the max log-probability
                 correct += pred.cpu().eq(indx_target).sum()
 
             test_loss = test_loss / len(test_loader) # average over number of mini-batch
             acc = 100. * correct / len(test_loader.dataset)
-            print('\tTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)'.format(
+            print(args.data_root, '\tTest set: Average loss: {:.4f}, Accuracy: {}/{} ({:.0f}%)'.format(
                 test_loss, correct, len(test_loader.dataset), acc))
             if acc > best_acc:
                 new_file = os.path.join(args.logdir, 'best.pth')
-                misc.model_snapshot(model, new_file, old_file=old_file, verbose=True)
+                torch.save(model.state_dict(), new_file)
                 best_acc = acc
                 old_file = new_file
 except Exception as e:
     import traceback
     traceback.print_exc()
 finally:
-    print("Total Elapse: {:.2f}, Best Result: {:.3f}%".format(time.time()-t_begin, best_acc))
+    print(args.data_root, "Total Elapse: {:.2f}, Best Result: {:.3f}%".format(time.time()-t_begin, best_acc))
 
 
