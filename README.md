@@ -22,7 +22,7 @@ chmod +x train.sh
 ./train.sh 
 ```
 
-> Traing Explainer Model
+> Training Explainer Model
 
 ```
 # change data and logs directory in main.py (in function arguments)
