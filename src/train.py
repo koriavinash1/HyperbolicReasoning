@@ -98,7 +98,7 @@ class Trainer():
                 self.classifier_baseline = self.classifier_baseline_
 
 
-            for p in self.classifier_baseline_.parameters(): p.requires_grad = False 
+            for p in self.classifier_baseline.parameters(): p.requires_grad = False 
             for p in self.feature_extractor.parameters(): p.requires_grad = False 
         
 
@@ -115,17 +115,19 @@ class Trainer():
         
         # Quantized classifier
         clfq = []
-        clfq.append(nn.Linear(self.emb_dim, self.nclasses))
-        # clfq.append(nn.Linear(self.latent_size, self.nclasses))
+        #clfq.append(torch.nn.Linear(self.emb_dim, self.emb_dim//2))
+        #clfq.append(torch.nn.Linear(self.emb_dim, self.nclasses))
+        clfq.append(torch.nn.Linear(self.given_channels, self.given_channels//2))
+        clfq.append(torch.nn.Linear(self.given_channels//2, self.nclasses))
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
-
+        for p in self.classifier_quantized.parameters(): p.requires_grad = True
 
             
 
         # Optimiser for binary weights
         self.opt = MomentumWithThresholdBinaryOptimizer(
                          list(self.modelclass.reasoning_parameters()),
-                         list(self.modelclass.other_parameters()) + list(self.classifier_quantized.parameters()),
+                         list(self.modelclass.other_parameters())+ list(self.classifier_quantized.parameters()),
                          ar=0.0001, 
                          threshold=1e-7,
                          adam_lr=self.lr,
@@ -223,9 +225,11 @@ class Trainer():
             else:
                 decoder_features = classifier_features = features
 
+            classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
+            
+            """
             classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3])
             cf = []
-            # Unique sampling of final codebook symbols
             for i in range(classifier_features.shape[0]):
                 x = torch.round(torch.mean(classifier_features[i], dim =1)* 10**5)/ (10**5)
                 xx = torch.unique(x)
@@ -236,8 +240,13 @@ class Trainer():
                     w.append(z)
                 w = torch.mean(torch.stack(w), dim = 0)
                 cf.append(w)
-
-            classifier_features = torch.stack(cf)
+            """
+            
+            #classifier_features = torch.stack(cf)
+            #classifier_features = torch.mean(classifier_features, dim =1)    
+            
+            classifier_features = torch.mean(classifier_features, dim =2)
+            #print(classifier_features.shape)
             dis_target = m(self.cq(classifier_features))
             class_loss_ = ce_loss(logits = dis_target, target = conti_target)
 
@@ -250,18 +259,19 @@ class Trainer():
             loss = class_loss_ +  quant_loss + ploss #+ recon_loss_  # quant_loss = quant_loss + cb_disentanglement_loss
             loss.backward()
             self.opt.step()
+             
             # Normalising weights of edges
             for l in self.modelclass.Aggregation:
                 l.weight=torch.nn.Parameter((l.weight - torch.min(l.weight))/(torch.max(l.weight) - torch.min(l.weight)))
             # Normalise weights of feature attention function
             for l in self.modelclass.featureattns:
                 l.weight=torch.nn.Parameter((l.weight - torch.min(l.weight))/(torch.max(l.weight) - torch.min(l.weight)))
-
+            
 
 
             self.training_pbar.update(batch_idx)
-            self.training_widgets[0] = progressbar.FormatLabel(
-            # print(
+            #self.training_widgets[0] = progressbar.FormatLabel(
+            print(
                                 f" tepoch:%.1f" % epoch +
                                 f" tcloss:%.4f" % class_loss_ +
                                 f" poincareloss:%.4f" % ploss +
@@ -303,9 +313,11 @@ class Trainer():
             else:
                 decoder_features = classifier_features = features
 
+
+            classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
+            """
             classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3])
             cf = []
-            # Unique sampling of final codebook symbols
             for i in range(classifier_features.shape[0]):
                 x = torch.round(torch.mean(classifier_features[i], dim =1)* 10**5)/ (10**5)
                 xx = torch.unique(x)
@@ -318,6 +330,7 @@ class Trainer():
                 cf.append(w)
 
             classifier_features = torch.stack(cf)
+            """
             dis_target = m(self.cq(classifier_features))
             recon = self.dec(decoder_features)
 
@@ -355,8 +368,8 @@ class Trainer():
             mean_acc_score.append(acc)
 
             self.validation_pbar.update(batch_idx)
-            self.validation_widgets[0] = progressbar.FormatLabel(
-            # print(                    
+            #self.validation_widgets[0] = progressbar.FormatLabels(
+            print(                    
                                 f" vepoch:%.1f" % epoch +
                                 f" vrcnloss:%.4f" % recon_loss_ +
                                 f" vcloss:%.4f" % class_loss_ +
