@@ -5,10 +5,10 @@ from collections import OrderedDict
 from Classifier import model
 
 model_urls = {
-    'afhq': 'Classifier/Logs/AFHQ/best.pth',
-    'mnist': 'Classifier/Logs/MNIST/best.pth',
-    'stl10' : 'Classifier/Logs/STL10/best.pth',
-    'mimic': 'Classifier/Logs/MIMIC/best.pth'
+    'afhq':  '/vol/biomedic2/agk21/PhDLogs/codes/HyperbolicReasoning/Classifier/Logs/AFHQ/best.pth',
+    'mnist': '/vol/biomedic2/agk21/PhDLogs/codes/HyperbolicReasoning/Classifier/Logs/MNIST/best.pth',
+    'stl10': '/vol/biomedic2/agk21/PhDLogs/codes/HyperbolicReasoning/Classifier/Logs/STL10/best.pth',
+    'mimic': '/vol/biomedic2/agk21/PhDLogs/codes/HyperbolicReasoning/Classifier/Logs/MIMIC/best.pth'
 }
 
 class SVHN(nn.Module):

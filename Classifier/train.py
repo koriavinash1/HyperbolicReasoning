@@ -86,7 +86,7 @@ try:
             indx_target = target.clone()
 
             if args.binary:
-                indx_target = target.clone()[:, 0] # abnormal 1, normal 0
+                indx_target = torch.argmax(target, 1)
 
             if args.cuda:
                 data, target = data.cuda(), target.cuda()
@@ -126,7 +126,7 @@ try:
                 indx_target = target.clone()
 
                 if args.binary:
-                    indx_target = target.clone()[:, 0] # abnormal 1, normal 0
+                    indx_target = torch.argmax(target, 1)
 
 
                 if args.cuda:

@@ -115,7 +115,8 @@ class Trainer():
         
         # Quantized classifier
         clfq = []
-        clfq.append(BinaryLinear(self.emb_dim, self.nclasses))
+        clfq.append(nn.Linear(self.emb_dim, self.nclasses))
+        # clfq.append(nn.Linear(self.latent_size, self.nclasses))
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
 
 
@@ -123,8 +124,8 @@ class Trainer():
 
         # Optimiser for binary weights
         self.opt = MomentumWithThresholdBinaryOptimizer(
-                         list(self.modelclass.reasoning_parameters()) + list(self.classifier_quantized.parameters()),
-                         list(self.modelclass.other_parameters()),
+                         list(self.modelclass.reasoning_parameters()),
+                         list(self.modelclass.other_parameters()) + list(self.classifier_quantized.parameters()),
                          ar=0.0001, 
                          threshold=1e-7,
                          adam_lr=self.lr,
@@ -302,8 +303,21 @@ class Trainer():
             else:
                 decoder_features = classifier_features = features
 
-            classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
+            classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3])
+            cf = []
+            # Unique sampling of final codebook symbols
+            for i in range(classifier_features.shape[0]):
+                x = torch.round(torch.mean(classifier_features[i], dim =1)* 10**5)/ (10**5)
+                xx = torch.unique(x)
+                w = []
+                for j in range(xx.shape[0]):
+                    y = torch.nonzero(xx[j] == x)
+                    z = classifier_features[i][y[0]]
+                    w.append(z)
+                w = torch.mean(torch.stack(w), dim = 0)
+                cf.append(w)
 
+            classifier_features = torch.stack(cf)
             dis_target = m(self.cq(classifier_features))
             recon = self.dec(decoder_features)
 

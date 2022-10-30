@@ -22,7 +22,7 @@ class SVHN(nn.Module):
 
     def forward(self, x):
         x = self.features(x)
-        x = x.view(x.size(0), -1)
+        x = nn.functional.adaptive_avg_pool2d(x,(1,1)).view(x.size(0),-1)
         x = self.classifier(x)
         return x
 
