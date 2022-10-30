@@ -117,9 +117,9 @@ class Trainer():
         clfq = []
         #clfq.append(torch.nn.Linear(self.emb_dim, self.emb_dim//2))
         #clfq.append(torch.nn.Linear(self.emb_dim, self.nclasses))
-        #clfq.append(torch.nn.Linear(self.given_channels, self.given_channels//2))
-        #clfq.append(torch.nn.Linear(self.given_channels//2, self.nclasses))
-        clfq.append(torch.nn.Linear(self.given_channels, self.nclasses))
+        clfq.append(torch.nn.Linear(self.given_channels, self.given_channels//2))
+        clfq.append(torch.nn.Linear(self.given_channels//2, self.nclasses))
+        #clfq.append(torch.nn.Linear(self.given_channels, self.nclasses))
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
         for p in self.classifier_quantized.parameters(): p.requires_grad = True
 
@@ -133,7 +133,7 @@ class Trainer():
                          threshold=1e-7,
                          adam_lr=self.lr,
                      )
-        #self.LR_sch = ReduceLROnPlateau(self.opt._adam, patience=2)
+        self.LR_sch = ReduceLROnPlateau(self.opt._adam, patience=2)
 
 
 
@@ -258,14 +258,14 @@ class Trainer():
             loss = class_loss_ +  quant_loss + ploss #+ recon_loss_  # quant_loss = quant_loss + cb_disentanglement_loss
             loss.backward()
             self.opt.step()
-            """ 
+             
             # Normalising weights of edges
             for l in self.modelclass.Aggregation:
                 l.weight=torch.nn.Parameter((l.weight - torch.min(l.weight))/(torch.max(l.weight) - torch.min(l.weight)))
             # Normalise weights of feature attention function
             for l in self.modelclass.featureattns:
                 l.weight=torch.nn.Parameter((l.weight - torch.min(l.weight))/(torch.max(l.weight) - torch.min(l.weight)))
-            """
+            
 
 
             self.training_pbar.update(batch_idx)
@@ -447,8 +447,8 @@ class Trainer():
             if loss < min_loss:
                 self.save_classmodel(iepoch, stats)
                 min_loss = loss
-            #else:
-            #    self.LR_sch.step(loss)
+            else:
+                self.LR_sch.step(loss)
 
             if rloss < min_recon:
                 min_recon = rloss

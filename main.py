@@ -24,7 +24,7 @@ def train_from_folder(\
                       ch=32,
                       num_res_blocks = 1,
                       nepochs=100,
-                      learning_rate=2e-4,
+                      learning_rate=5e-4,
                       decoder_learning_rate=1e-3,
                       num_workers=10,
                       sigma = 0.1,

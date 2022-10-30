@@ -379,7 +379,7 @@ class GeometricVQ(nn.Module):
            zn = torch.nn.functional.normalize(z_q).view(z.shape) 
         
         else:
-            #attention_w = (attention_w - torch.min(attention_w))/(torch.max(attention_w) - torch.min(attention_w))
+           # attention_w = (attention_w - torch.min(attention_w))/(torch.max(attention_w) - torch.min(attention_w))
             
             cb_attn = torch.einsum('md,mn->nd', 
                                     self.logmap0(self.h(self.expmap0(prev_cb.clone().detach()))), 
