@@ -303,7 +303,7 @@ class GeometricVQ(nn.Module):
     # https://arxiv.org/abs/1910.12933 (Hyperbolic Convolutional Neural Networks)
     
     # Poincare distance
-    def dist(self, u, v):
+    def distp(self, u, v):
         sqdist = torch.sum(u ** 2, dim=1,  keepdim=True) + \
                  torch.sum(v ** 2, dim=1) - 2 * \
                  torch.einsum('bd,dn->bn', u, rearrange(v, 'n d -> d n'))
@@ -379,7 +379,7 @@ class GeometricVQ(nn.Module):
            zn = torch.nn.functional.normalize(z_q).view(z.shape) 
         
         else:
-            attention_w = (attention_w - torch.min(attention_w))/(torch.max(attention_w) - torch.min(attention_w))
+            #attention_w = (attention_w - torch.min(attention_w))/(torch.max(attention_w) - torch.min(attention_w))
             
             cb_attn = torch.einsum('md,mn->nd', 
                                     self.logmap0(self.h(self.expmap0(prev_cb.clone().detach()))), 
@@ -388,6 +388,8 @@ class GeometricVQ(nn.Module):
             cb_attnx = self.to_poincare(self.expmap0(cb_attn))
             zfl = self.to_poincare(self.expmap0(z_flattened))
             #distance matrix
+            dd = self.distp(zfl, cb_attnx)
+            """
             dd = torch.ones(si.shape[0], z.shape[1], self.n_e, device = self.device)
             # binary attention masking
             bin_att = torch.where(attention_w !=  0, 1, 0)
@@ -408,11 +410,11 @@ class GeometricVQ(nn.Module):
                 else:
                    sampled_i = torch.nonzero(samples > 0)
                    samplesf = torch.squeeze(cb_attnx[sampled_i], dim = 0)
-                newd= self.dist(zfl2[v],  samplesf)
+                newd= self.distp(zfl2[v],  samplesf)
                 f[:,torch.squeeze(sampled_i, dim =0)] = newd
                 dd[v]=f
             dd = dd.view(zfl.shape[0], self.n_e)
-            
+            """
             """
             # Sample subset of hyperbolic codebook which contains connected edges with each symbol sampled from previous codebook
             i_flattened = si.view(-1, 1)

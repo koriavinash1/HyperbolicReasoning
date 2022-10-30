@@ -10,11 +10,11 @@ from clsmodel import mnist, stl10, afhq, vafhq, mimic
 
 # This is the main function to run training of the discrete surrogate model
 def train_from_folder(\
-                      data_root='../../datasets/MNIST/',
+                      data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MNIST/',
                       logs_root='LOGS',
                       name='MNIST',
                       image_size=(32,32),
-                      codebook_size = [64, 32, 4],
+                      codebook_size = [128, 32, 4],
                       latent_dim=64,
                       in_channels_codebook = 64,
                       batch_size=50,
@@ -23,8 +23,8 @@ def train_from_folder(\
                       avg_pool=False,
                       ch=32,
                       num_res_blocks = 1,
-                      nepochs=1000,
-                      learning_rate=1e-3,
+                      nepochs=100,
+                      learning_rate=2e-4,
                       decoder_learning_rate=1e-3,
                       num_workers=10,
                       sigma = 0.1,
