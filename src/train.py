@@ -116,7 +116,7 @@ class Trainer():
         # Quantized classifier
         clfq = []
         #clfq.append(torch.nn.Linear(self.emb_dim, self.emb_dim//2))
-        #clfq.append(torch.nn.Linear(self.emb_dim, self.nclasses))
+        #clfq.append(torch.nn.Linear(self.emb_dim//2, self.nclasses))
         clfq.append(torch.nn.Linear(self.given_channels, self.given_channels//2))
         clfq.append(torch.nn.Linear(self.given_channels//2, self.nclasses))
         #clfq.append(torch.nn.Linear(self.given_channels, self.nclasses))
@@ -133,7 +133,7 @@ class Trainer():
                          threshold=1e-7,
                          adam_lr=self.lr,
                      )
-        self.LR_sch = ReduceLROnPlateau(self.opt._adam, patience=2)
+        #self.LR_sch = ReduceLROnPlateau(self.opt._adam, patience=2)
 
 
 
@@ -240,8 +240,9 @@ class Trainer():
                     w.append(z)
                 w = torch.mean(torch.stack(w), dim = 0)
                 cf.append(w)
+            
+            classifier_features = torch.stack(cf)
             """
-            #classifier_features = torch.stack(cf)
             #classifier_features = torch.mean(classifier_features, dim =1)    
             
             classifier_features = torch.mean(classifier_features, dim =2)
@@ -258,16 +259,17 @@ class Trainer():
             loss = class_loss_ +  quant_loss + ploss #+ recon_loss_  # quant_loss = quant_loss + cb_disentanglement_loss
             loss.backward()
             self.opt.step()
-             
+            """             
             # Normalising weights of edges
             for l in self.modelclass.Aggregation:
-                l.weight=torch.nn.Parameter((l.weight - torch.min(l.weight))/(torch.max(l.weight) - torch.min(l.weight)))
+                #l.weight=torch.nn.Parameter((l.weight - torch.min(l.weight))/(torch.max(l.weight) - torch.min(l.weight)))
+                print(l.weight.grad)
             # Normalise weights of feature attention function
             for l in self.modelclass.featureattns:
-                l.weight=torch.nn.Parameter((l.weight - torch.min(l.weight))/(torch.max(l.weight) - torch.min(l.weight)))
-            
+                #l.weight=torch.nn.Parameter((l.weight - torch.min(l.weight))/(torch.max(l.weight) - torch.min(l.weight)))
+                print(l.weight.grad)
 
-
+            """
             self.training_pbar.update(batch_idx)
             #self.training_widgets[0] = progressbar.FormatLabel(
             print(
@@ -447,8 +449,8 @@ class Trainer():
             if loss < min_loss:
                 self.save_classmodel(iepoch, stats)
                 min_loss = loss
-            else:
-                self.LR_sch.step(loss)
+            #else:
+            #    self.LR_sch.step(loss)
 
             if rloss < min_recon:
                 min_recon = rloss

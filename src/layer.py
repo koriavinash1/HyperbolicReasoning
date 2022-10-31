@@ -379,7 +379,7 @@ class GeometricVQ(nn.Module):
            zn = torch.nn.functional.normalize(z_q).view(z.shape) 
         
         else:
-           # attention_w = (attention_w - torch.min(attention_w))/(torch.max(attention_w) - torch.min(attention_w))
+            #attention_w = (attention_w - torch.min(attention_w))/(torch.max(attention_w) - torch.min(attention_w))
             
             cb_attn = torch.einsum('md,mn->nd', 
                                     self.logmap0(self.h(self.expmap0(prev_cb.clone().detach()))), 
@@ -396,6 +396,7 @@ class GeometricVQ(nn.Module):
             # reshape sample
             zfl2 = zfl.view(si.shape[0], z.shape[1], zfl.shape[1])
             # Sample subset of hyperbolic codebook which contains connected edges with all symbol sampled from previous codebook
+            
             for v in range(si.shape[0]):
                 f = torch.ones( z.shape[1],self.n_e,  device = self.device)
                 samplesind = torch.squeeze(si[v,:])
@@ -414,7 +415,7 @@ class GeometricVQ(nn.Module):
                 f[:,torch.squeeze(sampled_i, dim =0)] = newd
                 dd[v]=f
             dd = dd.view(zfl.shape[0], self.n_e)
-            """
+            """ 
             """
             # Sample subset of hyperbolic codebook which contains connected edges with each symbol sampled from previous codebook
             i_flattened = si.view(-1, 1)
@@ -612,12 +613,12 @@ class HierarchyVQmodulator(nn.Module):
                 self.rattn = BinaryLinear(codebooksize[i],
                                             codebooksize[i+1],
                                         )
-                self.r = torch.nn.Linear(codebooksize[i],
-                                        codebooksize[i+1],
-                                        )
+                #self.r = torch.nn.Linear(codebooksize[i],
+                #                        codebooksize[i+1],bias=False,
+                #                        )
                 self.rattn.apply(wc)
                 self.reasoningLayers.append(self.rattn)   
-                self.Aggregation.append(self.r)
+           #     self.Aggregation.append(self.r)
 
         # ====================================================================
         # poincare layers for poincare projection
@@ -745,8 +746,8 @@ class HierarchyVQmodulator(nn.Module):
                 z_q, loss, sampled_idx, cvH, cdH, \
                     prevcb, attention_w, cb_attnp, si, zn = self.quantizeBlocks[i](qinput,
                                                             cb_attnp,
-                                                            (self.reasoningLayers[i-1].weight*self.Aggregation[i-1].weight).T, si)
-
+                                                            #(self.reasoningLayers[i-1].weight*self.Aggregation[i-1].weight).T, si)
+                                                            (self.reasoningLayers[i-1].weight).T, si)
             if i < (len(self.quantizeBlocks) -1):
                 qinput = self.attention(z_q, self.featureattns[i], self.hyperbolicLayers[i])
 

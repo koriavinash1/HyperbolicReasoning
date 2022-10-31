@@ -7,7 +7,7 @@ import torch.nn.functional as f
 from torch import Tensor
 from torch.autograd import Function
 from torch.optim.optimizer import Optimizer
-from torch.optim import Adam
+from torch.optim import Adam, AdamW
 from collections import OrderedDict
 
 
@@ -71,7 +71,7 @@ class MomentumWithThresholdBinaryOptimizer(Optimizer):
             )
 
         self.total_weights = {}
-        self._adam = Adam(bn_params, lr=adam_lr)
+        self._adam = AdamW(bn_params, lr=adam_lr)
 
         defaults = dict(adaptivity_rate=ar, threshold=threshold)
         super(MomentumWithThresholdBinaryOptimizer, self).__init__(
