@@ -119,7 +119,6 @@ class Trainer():
         #clfq.append(torch.nn.Linear(self.emb_dim//2, self.nclasses))
         clfq.append(torch.nn.Linear(self.given_channels, self.given_channels//2))
         clfq.append(torch.nn.Linear(self.given_channels//2, self.nclasses))
-        #clfq.append(torch.nn.Linear(self.given_channels, self.nclasses))
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
         for p in self.classifier_quantized.parameters(): p.requires_grad = True
 
@@ -225,11 +224,12 @@ class Trainer():
                 decoder_features = features[0]
             else:
                 decoder_features = classifier_features = features
+
+            classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
+            
+            """
             classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3])
             cf = []
-            
-            # Unique sampling of final codebook symbols
-            """
             for i in range(classifier_features.shape[0]):
                 x = torch.round(torch.mean(classifier_features[i], dim =1)* 10**5)/ (10**5)
                 xx = torch.unique(x)
@@ -243,6 +243,11 @@ class Trainer():
             
             classifier_features = torch.stack(cf)
             """
+<<<<<<< HEAD
+=======
+            
+            #classifier_features = torch.stack(cf)
+>>>>>>> b818b5c28a852b7d90ad90437b45c8bcdfb93865
             #classifier_features = torch.mean(classifier_features, dim =1)    
             
             classifier_features = torch.mean(classifier_features, dim =2)
@@ -313,6 +318,7 @@ class Trainer():
                 decoder_features = features[0]
             else:
                 decoder_features = classifier_features = features
+
 
             classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
             """

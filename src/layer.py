@@ -569,7 +569,7 @@ class HierarchyVQmodulator(nn.Module):
                                             quantise = self.quantise, 
                                             sigma=0.1))
         for cbsize in codebooksize[1:]:
-                self.quantizeBlocks.append(GeometricVQ(device, 
+            self.quantizeBlocks.append(GeometricVQ(device, 
                                             cbsize, 
                                             emb_dim, 
                                             beta=1.0,

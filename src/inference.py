@@ -336,7 +336,7 @@ class InductiveReasoningDT(object):
         return heirarchical_rules
     
     # Plot trees
-    def show(self, rule, target, body, save_path=None, cmap='coolwarm', overlay=None):
+    def show(self, rule, target, body, save_path=None, cmap='coolwarm', overlay=None, return_plots=False):
         
         def check(image, normalize=True):
             if image.dtype == np.float32:
@@ -353,6 +353,10 @@ class InductiveReasoningDT(object):
         target = check(target.squeeze().cpu().numpy())
         body = [check(b.squeeze().cpu().numpy()) for b in body]
         
+
+        if return_plots:
+            return [target] + body
+
         nimgs = len(body) + 1
         img_size = 3
         nrows = 1
