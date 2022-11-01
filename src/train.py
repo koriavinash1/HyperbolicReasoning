@@ -92,6 +92,7 @@ class Trainer():
         with torch.no_grad():
             self.feature_extractor = classifier.features.to(self.device).eval()
             self.classifier_baseline_ = classifier.classifier.to(self.device).eval()
+            print(self.classifier_baseline_)
             if avg_pool:
                 self.classifier_baseline = lambda x: self.classifier_baseline_(nn.functional.adaptive_avg_pool2d(x,(1,1)).view(x.size(0),-1)) 
             else:
@@ -128,7 +129,7 @@ class Trainer():
         #clfq.append(torch.nn.Linear(self.emb_dim, self.nclasses))
         #clfq.append(torch.nn.Linear(self.required_channels, self.required_channels//2))
         #clfq.append(torch.nn.Linear(self.required_channels//2, self.nclasses))
-        clfq.append(torch.nn.Linear(self.required_channels, self.nclasses))
+        clfq.append(torch.nn.Linear(self.required_channels*self.emb_dim, self.nclasses))
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
         for p in self.classifier_quantized.parameters(): p.requires_grad = True
 
@@ -221,11 +222,10 @@ class Trainer():
             # feature extraction
             with torch.no_grad():
                 f = self.feature_extractor(data)
-                f_ = f if self.avg_pool else f.view(f.size(0), -1)
+                f_ = torch.mean(f.view(f.shape[0], f.shape[1], f.shape[2]*f.shape[3]), 2)#f if self.avg_pool else f.view(f.size(0), -1)
                 conti_target = m(self.classifier_baseline(f_))
                 conti_target = torch.argmax(conti_target, 1)
                     
-
             # code book sampling
             quant_loss, ploss, features, _, cvE , cdE, attnblocks, codebooks  = self.modelclass(f)
 
@@ -235,10 +235,12 @@ class Trainer():
             else:
                 decoder_features = classifier_features = features
             #classifier_features = self.c(classifier_features)
-            classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
+            #classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
+            
+            #for p in self.classifier_quantized.parameters(): print(p.grad) 
+            classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1] * classifier_features.shape[2]*classifier_features.shape[3])
             
             """
-            classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3])
             cf = []
             for i in range(classifier_features.shape[0]):
                 x = torch.round(torch.mean(classifier_features[i], dim =1)* 10**5)/ (10**5)
@@ -260,7 +262,6 @@ class Trainer():
             #print(classifier_features.shape)
             dis_target = m(self.cq(classifier_features))
             class_loss_ = ce_loss(logits = dis_target, target = conti_target)
-
 
             recon = self.dec(decoder_features.clone().detach())
             recon_loss_ = recon_loss(logits = recon, target = data)
@@ -311,7 +312,9 @@ class Trainer():
             # feature extraction
             with torch.no_grad():
                 f = self.feature_extractor(data)
-                f_ = f if self.avg_pool else f.view(f.size(0), -1)
+                print(f.shape)
+                #f_ = f if self.avg_pool else f.view(f.size(0), -1)
+                f_ = torch.mean(f.view(f.shape[0], f.shape[1], f.shape[2]*f.shape[3]), 2)
                 conti_target = m(self.classifier_baseline(f_))
                 conti_target = torch.argmax(conti_target, 1)
 
@@ -326,9 +329,10 @@ class Trainer():
                 decoder_features = classifier_features = features
 
             #classifier_features = self.c(classifier_features)
-            classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
+            #classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
+            
+            classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1] *  classifier_features.shape[2]*classifier_features.shape[3])
             """
-            classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3])
             cf = []
             for i in range(classifier_features.shape[0]):
                 x = torch.round(torch.mean(classifier_features[i], dim =1)* 10**5)/ (10**5)
