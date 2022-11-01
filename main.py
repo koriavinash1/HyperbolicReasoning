@@ -10,21 +10,21 @@ from clsmodel import mnist, stl10, afhq, vafhq, mimic
 
 # This is the main function to run training of the discrete surrogate model
 def train_from_folder(\
-                      data_root='/vol/biomedic2/agk21/PhDLogs/datasets/MNIST/',
+                      data_root='/vol/biomedic2/agk21/PhDLogs/datasets/AFHQ/afhq',
                       logs_root='LOGS',
                       name='MNIST',
-                      image_size=(32,32),
-                      codebook_size = [128, 64, 4],
-                      latent_dim=64,
-                      in_channels_codebook = 64,
+                      image_size=(128,128),
+                      codebook_size = [256, 64, 3],
+                      latent_dim=128,
+                      in_channels_codebook = 1024,
                       batch_size=50,
-                      ch_mult=(1, 2, 4, 8),
-                      nclasses=10,
+                      ch_mult=(1, 2, 4, 8, 16, 32),
+                      nclasses=3,
                       avg_pool=False,
                       ch=32,
                       num_res_blocks = 1,
-                      nepochs=20,
-                      learning_rate=1e-3,
+                      nepochs=100,
+                      learning_rate=2e-4,
                       decoder_learning_rate=1e-3,
                       num_workers=10,
                       sigma = 0.1,
@@ -68,23 +68,23 @@ def train_from_folder(\
         net = mnist(32, True)
         model_args['image_size'] = (32, 32)
         model_args['nclasses'] = 10
-        model_args['latent_dim'] = 64
+        model_args['inchannels_codebook'] = 64
     elif data_root.lower().__contains__('stl'):
         net = stl10(3, True)
         model_args['image_size'] = (128, 128)
         model_args['nclasses'] = 10
-        model_args['latent_dim'] = 1024
+        model_args['inchannels_codebook'] = 1024
     elif data_root.lower().__contains__('afhq'):
         net = afhq(3, True)
         model_args['image_size'] = (128, 128)
         model_args['nclasses'] = 3
-        model_args['latent_dim'] = 1024
+        model_args['inchannels_codebook'] = 1024
         # net = vafhq(32, True)
     elif data_root.lower().__contains__('mimic'):
         net = mimic(3, True)
         model_args['image_size'] = (224, 224)
         model_args['nclasses'] = 2
-        model_args['latent_dim'] = 1024
+        model_args['inchannels_codebook'] = 1024
     else:
         raise ValueError("explainee model not found")
 

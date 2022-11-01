@@ -388,8 +388,8 @@ class GeometricVQ(nn.Module):
             cb_attnx = self.to_poincare(self.expmap0(cb_attn))
             zfl = self.to_poincare(self.expmap0(z_flattened))
             #distance matrix
-            dd = self.distp(zfl, cb_attnx)
-            """
+            #dd = self.distp(zfl, cb_attnx)
+            
             dd = torch.ones(si.shape[0], z.shape[1], self.n_e, device = self.device)
             # binary attention masking
             bin_att = torch.where(attention_w !=  0, 1, 0)
@@ -415,7 +415,7 @@ class GeometricVQ(nn.Module):
                 f[:,torch.squeeze(sampled_i, dim =0)] = newd
                 dd[v]=f
             dd = dd.view(zfl.shape[0], self.n_e)
-            """ 
+             
             """
             # Sample subset of hyperbolic codebook which contains connected edges with each symbol sampled from previous codebook
             i_flattened = si.view(-1, 1)
@@ -435,8 +435,8 @@ class GeometricVQ(nn.Module):
                 newd = self.dist(torch.unsqueeze(zfl[v], dim =0), cb_attnx[sampled_i])# if len(sampled_i) > 1 else torch.squeeze(cb_attnx[sampled_i], dim =0))
                 f.scatter_(0,sampled_i,torch.squeeze(newd))
                 dd[v]=f#.scatter_(0,torch.unsqueeze(sampled_i, dim = 0),torch.squeeze(newd))
-             """
-
+            """
+        
 
             #Indices sampled from codebook reshaped into z (si)
             min_encoding_indices = torch.argmin(dd, dim =1)
@@ -771,7 +771,7 @@ class HierarchyVQmodulator(nn.Module):
             projections.append(poincare_projection1)
             attention = 1
             if not (attention_ws[i] is None):
-                attention = torch.where(attention_ws[i] > 0.5, 1, 0)
+                attention = torch.where(attention_ws[i] > 0.0, 1, 0)
                 attentionList.append(attention)
 
             for j in range(len(cbattns)):

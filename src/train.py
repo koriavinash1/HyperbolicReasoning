@@ -64,7 +64,7 @@ class Trainer():
         self.nclasses = nclasses
 
         map = lambda x, y: [x[i]//y[-1] for i in range(len(x))]
-        self.emb_dim = inchannels_codebook if self.quantise == 'spatial' else int(np.prod(map(image_size, ch_mult))) 
+        self.emb_dim = latent_dim if self.quantise == 'spatial' else int(np.prod(map(image_size, ch_mult))) 
         self.latentdim = [self.latent_size]+map(image_size, ch_mult)
 
         self.nepochs = nepochs
@@ -112,13 +112,23 @@ class Trainer():
                                                 trim = self.trim,
                                                 quantise = self.quantise,
                                                 reasoning=self.reasoning).to(self.device)
+        """ 
+        self.c = torch.nn.Conv2d(self.given_channels,
+                                     self.given_channels,
+                                     kernel_size=1,
+                                     stride=1,
+                                     padding=0).to(self.device)
         
+        for p in self.c.parameters(): p.requires_grad = True
+        """
         # Quantized classifier
         clfq = []
         #clfq.append(torch.nn.Linear(self.emb_dim, self.emb_dim//2))
         #clfq.append(torch.nn.Linear(self.emb_dim//2, self.nclasses))
-        clfq.append(torch.nn.Linear(self.given_channels, self.given_channels//2))
-        clfq.append(torch.nn.Linear(self.given_channels//2, self.nclasses))
+        #clfq.append(torch.nn.Linear(self.emb_dim, self.nclasses))
+        #clfq.append(torch.nn.Linear(self.required_channels, self.required_channels//2))
+        #clfq.append(torch.nn.Linear(self.required_channels//2, self.nclasses))
+        clfq.append(torch.nn.Linear(self.required_channels, self.nclasses))
         self.classifier_quantized = nn.Sequential(*clfq).to(self.device)
         for p in self.classifier_quantized.parameters(): p.requires_grad = True
 
@@ -224,7 +234,7 @@ class Trainer():
                 decoder_features = features[0]
             else:
                 decoder_features = classifier_features = features
-
+            #classifier_features = self.c(classifier_features)
             classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
             
             """
@@ -243,14 +253,10 @@ class Trainer():
             
             classifier_features = torch.stack(cf)
             """
-<<<<<<< HEAD
-=======
             
             #classifier_features = torch.stack(cf)
->>>>>>> b818b5c28a852b7d90ad90437b45c8bcdfb93865
             #classifier_features = torch.mean(classifier_features, dim =1)    
             
-            classifier_features = torch.mean(classifier_features, dim =2)
             #print(classifier_features.shape)
             dis_target = m(self.cq(classifier_features))
             class_loss_ = ce_loss(logits = dis_target, target = conti_target)
@@ -319,7 +325,7 @@ class Trainer():
             else:
                 decoder_features = classifier_features = features
 
-
+            #classifier_features = self.c(classifier_features)
             classifier_features = torch.mean(classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3]), 2)
             """
             classifier_features = classifier_features.view(classifier_features.shape[0], classifier_features.shape[1], classifier_features.shape[2]*classifier_features.shape[3])

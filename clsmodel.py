@@ -55,7 +55,7 @@ def mnist(n_channel, pretrained=None):
         2*n_channel, 'M',
     ]
     layers = make_layers(cfg, batch_norm=True)
-    model = SVHN(layers, n_channel=32*n_channel, num_classes=10)
+    model = SVHN(layers, n_channel=2*n_channel, num_classes=10)
     if pretrained is not None:
         m = torch.load(model_urls['mnist'])
         state_dict = m.state_dict() if isinstance(m, nn.Module) else m
