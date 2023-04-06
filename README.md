@@ -1,4 +1,4 @@
-# Hierarchical Symbolic Reasoning in Hyperbolic Space for Deep Discriminative Models
+# Robust Hierarchical Symbolic Explanations in Hyperbolic Space for Image Classification
 
 
 ## Installation 
